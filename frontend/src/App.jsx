@@ -51,35 +51,55 @@ function App() {
     const userMessage = { role: 'user', content: inputMessage }
     const newMessages = [...messages, userMessage]
     setMessages(newMessages)
+    const messageToSend = inputMessage
     setInputMessage('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
     setIsLoading(true)
 
     try {
-      const response = await axios.post(`${API_BASE}/chat`, {
-        message: inputMessage,
+      const response = await axios.post(`${API_BASE}/campaign/chat`, {
+        message: messageToSend,
         campaignId: activeCampaignId,
         conversationHistory: newMessages
       })
 
+      const responseData = response.data
       const aiMessage = {
         role: 'assistant',
-        content: response.data.message,
-        campaignCost: response.data.campaignCost
+        content: responseData.message || responseData.response || responseData.content || 'No response received',
+        campaignCost: responseData.campaignCost || responseData.cost
       }
 
       const updatedMessages = [...newMessages, aiMessage]
       setMessages(updatedMessages)
       updateCampaign({ messages: updatedMessages })
 
-      if (response.data.campaignCost && !activeCampaign?.paid) {
-        setCampaignCost(response.data.campaignCost)
-        updateCampaign({ cost: response.data.campaignCost })
+      if (aiMessage.campaignCost && !activeCampaign?.paid) {
+        setCampaignCost(aiMessage.campaignCost)
+        updateCampaign({ cost: aiMessage.campaignCost })
         setIsPaymentModalOpen(true)
       }
     } catch (error) {
       console.error('Error sending message:', error)
-      setMessages([...newMessages, { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' }])
+      let errorMessage = 'Sorry, I encountered an error. Please try again.'
+      
+      if (error.response) {
+        // Server responded with error status
+        errorMessage = error.response.data?.error || 
+                      error.response.data?.message || 
+                      `Server error: ${error.response.status} ${error.response.statusText}`
+      } else if (error.request) {
+        // Request was made but no response received
+        errorMessage = 'Unable to reach the server. Please check your connection.'
+      } else {
+        // Something else happened
+        errorMessage = error.message || errorMessage
+      }
+      
+      setMessages([...newMessages, { 
+        role: 'assistant', 
+        content: errorMessage 
+      }])
     } finally {
       setIsLoading(false)
     }
