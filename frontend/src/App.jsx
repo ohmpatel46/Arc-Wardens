@@ -7,6 +7,8 @@ import CampaignAnalytics from './components/campaigns/CampaignAnalytics'
 import CampaignAnalyticsView from './components/campaigns/CampaignAnalyticsView'
 import LoadingSpinner from './components/shared/LoadingSpinner'
 import ConfirmationModal from './components/shared/ConfirmationModal'
+import { useAuth } from './context/AuthContext'
+import Login from './components/auth/Login'
 
 const API_BASE = '/api'
 
@@ -20,6 +22,8 @@ export const DEFAULT_ANALYTICS = {
 export const CAMPAIGN_COST = 1
 
 function App() {
+  const { user, logout, loading: authLoading } = useAuth()
+
   const [campaigns, setCampaigns] = useState([])
   const [activeCampaignId, setActiveCampaignId] = useState(null)
   const [showWallet, setShowWallet] = useState(false)
@@ -31,8 +35,8 @@ function App() {
   const [editingName, setEditingName] = useState('')
   const textareaRef = useRef(null)
 
-  // Wallet state
-  const [walletId, setWalletId] = useState(import.meta.env.VITE_WALLET_ID || localStorage.getItem('walletId') || '')
+  // Wallet state - isolate by user
+  const [walletId, setWalletId] = useState('')
   const [walletBalance, setWalletBalance] = useState(null)
   const [walletInfo, setWalletInfo] = useState(null)
   const [transactions, setTransactions] = useState([])
@@ -43,6 +47,22 @@ function App() {
   const [isSending, setIsSending] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
+
+  // Sync walletId when user changes
+  useEffect(() => {
+    if (user?.sub) {
+      const storedWalletId = localStorage.getItem(`walletId_${user.sub}`) || import.meta.env.VITE_WALLET_ID || '';
+      setWalletId(storedWalletId);
+    } else {
+      setWalletId('');
+    }
+  }, [user])
+
+  useEffect(() => {
+    if (user?.sub && walletId) {
+      localStorage.setItem(`walletId_${user.sub}`, walletId);
+    }
+  }, [walletId, user])
 
   const [currentWalletAddress, setCurrentWalletAddress] = useState('')
   const [showPaymentModal, setShowPaymentModal] = useState(false)
@@ -55,10 +75,22 @@ function App() {
   const activeCampaign = campaigns.find(c => c.id === activeCampaignId)
   const analytics = activeCampaign?.analytics || DEFAULT_ANALYTICS
 
-  // Load campaigns from database on mount
+  // Load campaigns from database on mount (only if user exists)
   useEffect(() => {
-    fetchCampaignsFromDB()
-  }, [])
+    // Clear all state FIRST when user changes
+    setCampaigns([])
+    setActiveCampaignId(null)
+    setMessages([])
+    setWalletBalance(null)
+    setTransactions([])
+
+    if (user) {
+      fetchCampaignsFromDB()
+    }
+  }, [user?.sub]) // Use user.sub to be specific about identity change
+
+  // if (authLoading) return <div className="h-screen flex items-center justify-center"><LoadingSpinner /></div>
+  // if (!user) return <Login />
 
   useEffect(() => {
     const campaign = campaigns.find(c => c.id === activeCampaignId)
@@ -69,24 +101,14 @@ function App() {
     try {
       const response = await axios.get(`${API_BASE}/campaigns`)
       if (response.data.success) {
-        // Merge with local state campaigns (for messages that aren't in DB yet)
-        const dbCampaigns = response.data.campaigns || []
-        const localCampaigns = campaigns.filter(c =>
-          !dbCampaigns.find(dbC => dbC.id === c.id)
-        )
-        // Ensure all campaigns have proper paid field (default to false if undefined)
-        setCampaigns([...dbCampaigns, ...localCampaigns])
+        setCampaigns(response.data.campaigns || [])
       }
     } catch (error) {
       console.error('Error fetching campaigns from database:', error)
     }
   }
 
-  useEffect(() => {
-    if (walletId) {
-      localStorage.setItem('walletId', walletId)
-    }
-  }, [walletId])
+  // REMOVED: Global walletId storage - now user-partitioned above
 
   useEffect(() => {
     if (showWallet && walletId) {
@@ -137,12 +159,14 @@ function App() {
     }
   }, [walletId])
 
-  // Poll for wallet data
+  // Poll for wallet data (only if user logged in)
   useEffect(() => {
-    fetchWalletData()
-    const interval = setInterval(fetchWalletData, 10000) // Poll every 10 seconds
-    return () => clearInterval(interval)
-  }, [fetchWalletData])
+    if (user) {
+      fetchWalletData()
+      const interval = setInterval(fetchWalletData, 10000) // Poll every 10 seconds
+      return () => clearInterval(interval)
+    }
+  }, [fetchWalletData, user])
 
   const handleSendTransaction = async () => {
     if (!walletId || !sendAmount || !sendAddress || !sendTokenId || isSending) return
@@ -425,6 +449,9 @@ function App() {
     }
   }
 
+  if (authLoading) return <div className="h-screen flex items-center justify-center"><LoadingSpinner /></div>
+  if (!user) return <Login />
+
   return (
     <div className="flex h-screen bg-white">
       <Sidebar
@@ -449,6 +476,7 @@ function App() {
         onNameChange={setEditingName}
         onWalletToggle={handleWalletToggle}
         onAnalyticsToggle={handleAnalyticsToggle}
+        onLogout={logout}
       />
 
       <div className="flex-1 flex flex-col relative">

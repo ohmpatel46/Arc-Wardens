@@ -26,9 +26,24 @@ def init_db():
     try:
         cursor.execute('ALTER TABLE campaigns ADD COLUMN executed BOOLEAN DEFAULT 0')
         cursor.execute('UPDATE campaigns SET executed = paid WHERE paid IS NOT NULL')
-        # Note: SQLite doesn't support DROP COLUMN, so we'll just use 'executed' going forward
     except sqlite3.OperationalError:
-        # Column already exists or migration not needed
+        pass
+
+    # Create users table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            name TEXT,
+            picture TEXT,
+            created_at TEXT NOT NULL
+        )
+    ''')
+
+    # Add user_id column to campaigns if not exists
+    try:
+        cursor.execute('ALTER TABLE campaigns ADD COLUMN user_id TEXT')
+    except sqlite3.OperationalError:
         pass
     
     # Create analytics table
@@ -69,8 +84,36 @@ def generate_sample_analytics(campaign_id):
         'bounceRate': bounce_rate
     }
 
-def get_all_campaigns():
-    """Get all campaigns from the database"""
+def create_user_if_not_exists(user_data):
+    """Create a user if they don't exist, otherwise update them"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            INSERT INTO users (id, email, name, picture, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (
+            user_data['user_id'],
+            user_data['email'],
+            user_data['name'],
+            user_data['picture'],
+            datetime.now().isoformat()
+        ))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        # User exists, update info
+        cursor.execute('''
+            UPDATE users 
+            SET name = ?, picture = ?
+            WHERE id = ?
+        ''', (user_data['name'], user_data['picture'], user_data['user_id']))
+        conn.commit()
+    finally:
+        conn.close()
+
+def get_all_campaigns(user_id):
+    """Get all campaigns for a specific user"""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -78,16 +121,14 @@ def get_all_campaigns():
                a.emails_sent, a.emails_opened, a.replies, a.bounce_rate
         FROM campaigns c
         LEFT JOIN analytics a ON c.id = a.campaign_id
+        WHERE c.user_id = ?
         ORDER BY c.created_at DESC
-    ''')
+    ''', (user_id,))
     rows = cursor.fetchall()
     conn.close()
     
     campaigns = []
-    campaigns = []
     for row in rows:
-        # Handle both 'paid' (old) and 'executed' (new) columns for migration
-        # SQLite Row doesn't support .get(), so convert to dict
         row_dict = dict(row)
         executed = bool(row_dict.get('executed') or row_dict.get('paid') or False)
         
@@ -95,11 +136,10 @@ def get_all_campaigns():
             'id': row['id'],
             'name': row['name'],
             'createdAt': row['created_at'],
-            'paid': executed, # Return as 'paid' for frontend compatibility
+            'paid': executed,
             'cost': row['cost'],
             'status': row['status']
         }
-        # If analytics exist, use them; otherwise generate sample analytics for executed campaigns
         if row['emails_sent'] is not None:
             campaign['analytics'] = {
                 'emailsSent': row['emails_sent'],
@@ -108,14 +148,13 @@ def get_all_campaigns():
                 'bounceRate': row['bounce_rate']
             }
         elif executed:
-            # Generate sample analytics for executed campaigns without analytics
             campaign['analytics'] = generate_sample_analytics(row['id'])
         campaigns.append(campaign)
     
     return campaigns
 
-def get_campaign_analytics(campaign_id):
-    """Get analytics for a specific campaign"""
+def get_campaign_analytics(campaign_id, user_id):
+    """Get analytics for a specific campaign belonging to a user"""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -123,15 +162,14 @@ def get_campaign_analytics(campaign_id):
                a.emails_sent, a.emails_opened, a.replies, a.bounce_rate
         FROM campaigns c
         LEFT JOIN analytics a ON c.id = a.campaign_id
-        WHERE c.id = ?
-    ''', (campaign_id,))
+        WHERE c.id = ? AND c.user_id = ?
+    ''', (campaign_id, user_id))
     row = cursor.fetchone()
     conn.close()
     
     if not row:
         return None
     
-    # Handle both 'paid' (old) and 'executed' (new) columns for migration
     row_dict = dict(row)
     executed = bool(row_dict.get('executed') or row_dict.get('paid') or False)
     
@@ -144,7 +182,6 @@ def get_campaign_analytics(campaign_id):
         'status': row['status']
     }
     
-    # If analytics exist, use them; otherwise generate sample analytics for executed campaigns
     if row['emails_sent'] is not None:
         campaign['analytics'] = {
             'emailsSent': row['emails_sent'],
@@ -153,37 +190,37 @@ def get_campaign_analytics(campaign_id):
             'bounceRate': row['bounce_rate']
         }
     elif executed:
-        # Generate sample analytics for executed campaigns without analytics
         campaign['analytics'] = generate_sample_analytics(campaign_id)
     
     return campaign
 
-def create_campaign(campaign_id, name, cost=None):
-    """Create a new campaign in the database"""
+def create_campaign(campaign_id, name, user_id, cost=None):
+    """Create a new campaign for a user"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute('''
-            INSERT INTO campaigns (id, name, created_at, executed, cost, status)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO campaigns (id, name, created_at, executed, cost, status, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (
             campaign_id,
             name,
             datetime.now().isoformat(),
             False,
             cost,
-            'draft'
+            'draft',
+            user_id
         ))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
-        # Campaign already exists, update it instead
+        # If it exists, verify ownership before update (or assume it's fine for now)
         cursor.execute('''
             UPDATE campaigns 
             SET name = ?, cost = ?
-            WHERE id = ?
-        ''', (name, cost, campaign_id))
+            WHERE id = ? AND user_id = ?
+        ''', (name, cost, campaign_id, user_id))
         conn.commit()
         return True
     except Exception as e:
@@ -192,8 +229,8 @@ def create_campaign(campaign_id, name, cost=None):
     finally:
         conn.close()
 
-def update_campaign(campaign_id, name=None, executed=None, cost=None, status=None):
-    """Update an existing campaign"""
+def update_campaign(campaign_id, user_id, name=None, executed=None, cost=None, status=None):
+    """Update an existing campaign for a user"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -217,8 +254,11 @@ def update_campaign(campaign_id, name=None, executed=None, cost=None, status=Non
         conn.close()
         return True
     
+    # Add WHERE clause values
     values.append(campaign_id)
-    query = f'UPDATE campaigns SET {", ".join(updates)} WHERE id = ?'
+    values.append(user_id)
+    
+    query = f'UPDATE campaigns SET {", ".join(updates)} WHERE id = ? AND user_id = ?'
     
     try:
         cursor.execute(query, values)
@@ -230,16 +270,21 @@ def update_campaign(campaign_id, name=None, executed=None, cost=None, status=Non
     finally:
         conn.close()
 
-def delete_campaign(campaign_id):
-    """Delete a campaign and its analytics"""
+def delete_campaign(campaign_id, user_id):
+    """Delete a campaign and its analytics if owned by user"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
+        # Check ownership first
+        cursor.execute('SELECT id FROM campaigns WHERE id = ? AND user_id = ?', (campaign_id, user_id))
+        if not cursor.fetchone():
+            return False
+
         # Delete analytics first (foreign key constraint)
         cursor.execute('DELETE FROM analytics WHERE campaign_id = ?', (campaign_id,))
         # Delete campaign
-        cursor.execute('DELETE FROM campaigns WHERE id = ?', (campaign_id,))
+        cursor.execute('DELETE FROM campaigns WHERE id = ? AND user_id = ?', (campaign_id, user_id))
         conn.commit()
         return True
     except Exception as e:
