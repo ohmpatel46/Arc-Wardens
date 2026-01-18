@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Import circle_crypto from parent directory
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Circle_wallet'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'Circle_wallet'))
 from circle_crypto import get_entity_secret_ciphertext
 
 load_dotenv()

@@ -1,6 +1,33 @@
 # Backend Server
 
-FastAPI server that provides API endpoints for Circle wallet operations.
+FastAPI server that provides API endpoints for Circle wallet operations and campaign management.
+
+## Project Structure
+
+```
+backend/
+├── agents/              # LangChain agents
+│   ├── __init__.py
+│   └── campaign_agent.py    # Central campaign agent
+├── tools/               # Agent tools (MCP-style)
+│   ├── __init__.py
+│   ├── intent_routing.py
+│   ├── apollo_tool.py
+│   ├── sheets_tool.py
+│   ├── gmail_tool.py
+│   ├── clarification.py
+│   └── repeat_campaign.py
+├── core/                # Core utilities
+│   ├── __init__.py
+│   ├── db.py            # Database operations
+│   └── wallet_utils.py  # Circle wallet utilities
+├── api/                 # API routes (future)
+│   └── routes/
+├── server.py            # FastAPI application entry point
+├── requirements.txt     # Python dependencies
+├── campaigns.db         # SQLite database (auto-generated)
+└── README.md
+```
 
 ## Features
 
@@ -8,6 +35,7 @@ FastAPI server that provides API endpoints for Circle wallet operations.
 - **Type Safety**: Pydantic models for request/response validation
 - **Auto Documentation**: Swagger UI available at `http://localhost:5000/docs`
 - **Async Support**: Built on async/await for better performance
+- **LangChain Agent**: AI-powered campaign agent with tool support
 
 ## Setup
 
@@ -21,6 +49,7 @@ pip install -r requirements.txt
    - `CIRCLE_API_KEY`
    - `CIRCLE_ENTITY_SECRET_BASE64`
    - `CIRCLE_PUBLIC_KEY_PEM`
+   - `OPENAI_API_KEY` (for the LangChain agent)
    - `CIRCLE_WALLET_ID` (optional, can be set in frontend)
 
 3. Run the server:
@@ -41,23 +70,31 @@ The server will run on `http://localhost:5000`
 
 ## API Endpoints
 
+### Wallet Endpoints
 - `GET /api/wallet/balance?walletId=<id>` - Get wallet balance
 - `GET /api/wallet/info?walletId=<id>` - Get wallet information
 - `GET /api/wallet/transactions?walletId=<id>&pageSize=50` - Get transaction history
 - `POST /api/wallet/send` - Send a transaction
-  ```json
-  {
-    "walletId": "...",
-    "receiverAddress": "0x...",
-    "amount": "1.0",
-    "tokenId": "..."
-  }
-  ```
 - `POST /api/wallet/faucet` - Request faucet funds
-  ```json
-  {
-    "address": "0x...",
-    "blockchain": "ARC-TESTNET"
-  }
-  ```
+
+### Campaign Endpoints
+- `GET /api/campaigns` - Get all campaigns
+- `GET /api/campaigns/{campaign_id}/analytics` - Get campaign analytics
+- `POST /api/campaign/chat` - Chat with campaign agent
+- `POST /api/campaign/create` - Create a campaign
+- `PUT /api/campaign/update` - Update a campaign
+- `DELETE /api/campaign/delete?campaignId=<id>` - Delete a campaign
+
+### Health
 - `GET /health` - Health check
+
+## Agent Tools
+
+The campaign agent has access to the following tools (currently placeholders):
+
+1. **intent_routing** - Routes user intent to appropriate tool
+2. **apollo_tool** - Apollo API for lead generation
+3. **sheets_tool** - Google Sheets for campaign data
+4. **gmail_tool** - Gmail for email campaigns
+5. **ask_for_clarification** - Asks user for clarification
+6. **repeat_campaign_action** - Repeats previous campaign actions

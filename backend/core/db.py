@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timedelta
 import random
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'campaigns.db')
+DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'campaigns.db')
 
 def init_db():
     """Initialize the database with schema and sample data"""
@@ -16,11 +16,20 @@ def init_db():
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            paid BOOLEAN DEFAULT 0,
+            executed BOOLEAN DEFAULT 0,
             cost REAL,
             status TEXT DEFAULT 'draft'
         )
     ''')
+    
+    # Migrate old 'paid' column to 'executed' if it exists
+    try:
+        cursor.execute('ALTER TABLE campaigns ADD COLUMN executed BOOLEAN DEFAULT 0')
+        cursor.execute('UPDATE campaigns SET executed = paid WHERE paid IS NOT NULL')
+        # Note: SQLite doesn't support DROP COLUMN, so we'll just use 'executed' going forward
+    except sqlite3.OperationalError:
+        # Column already exists or migration not needed
+        pass
     
     # Create analytics table
     cursor.execute('''
@@ -76,15 +85,18 @@ def get_all_campaigns():
     
     campaigns = []
     for row in rows:
+        # Handle both 'paid' (old) and 'executed' (new) columns for migration
+        executed = bool(row.get('executed') or row.get('paid') or False)
+        
         campaign = {
             'id': row['id'],
             'name': row['name'],
             'createdAt': row['created_at'],
-            'paid': bool(row['paid']),
+            'executed': executed,
             'cost': row['cost'],
             'status': row['status']
         }
-        # If analytics exist, use them; otherwise generate sample analytics for paid campaigns
+        # If analytics exist, use them; otherwise generate sample analytics for executed campaigns
         if row['emails_sent'] is not None:
             campaign['analytics'] = {
                 'emailsSent': row['emails_sent'],
@@ -92,9 +104,10 @@ def get_all_campaigns():
                 'replies': row['replies'],
                 'bounceRate': row['bounce_rate']
             }
-        elif bool(row['paid']):
-            # Generate sample analytics for paid campaigns without analytics
+        elif executed:
+            # Generate sample analytics for executed campaigns without analytics
             campaign['analytics'] = generate_sample_analytics(row['id'])
+        campaigns.append(campaign)
     
     return campaigns
 
@@ -115,16 +128,19 @@ def get_campaign_analytics(campaign_id):
     if not row:
         return None
     
+    # Handle both 'paid' (old) and 'executed' (new) columns for migration
+    executed = bool(row.get('executed') or row.get('paid') or False)
+    
     campaign = {
         'id': row['id'],
         'name': row['name'],
         'createdAt': row['created_at'],
-        'paid': bool(row['paid']),
+        'executed': executed,
         'cost': row['cost'],
         'status': row['status']
     }
     
-    # If analytics exist, use them; otherwise generate sample analytics for paid campaigns
+    # If analytics exist, use them; otherwise generate sample analytics for executed campaigns
     if row['emails_sent'] is not None:
         campaign['analytics'] = {
             'emailsSent': row['emails_sent'],
@@ -132,8 +148,8 @@ def get_campaign_analytics(campaign_id):
             'replies': row['replies'],
             'bounceRate': row['bounce_rate']
         }
-    elif bool(row['paid']):
-        # Generate sample analytics for paid campaigns without analytics
+    elif executed:
+        # Generate sample analytics for executed campaigns without analytics
         campaign['analytics'] = generate_sample_analytics(campaign_id)
     
     return campaign
@@ -145,7 +161,7 @@ def create_campaign(campaign_id, name, cost=None):
     
     try:
         cursor.execute('''
-            INSERT INTO campaigns (id, name, created_at, paid, cost, status)
+            INSERT INTO campaigns (id, name, created_at, executed, cost, status)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (
             campaign_id,
@@ -172,7 +188,7 @@ def create_campaign(campaign_id, name, cost=None):
     finally:
         conn.close()
 
-def update_campaign(campaign_id, name=None, paid=None, cost=None, status=None):
+def update_campaign(campaign_id, name=None, executed=None, cost=None, status=None):
     """Update an existing campaign"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -183,9 +199,9 @@ def update_campaign(campaign_id, name=None, paid=None, cost=None, status=None):
     if name is not None:
         updates.append('name = ?')
         values.append(name)
-    if paid is not None:
-        updates.append('paid = ?')
-        values.append(paid)
+    if executed is not None:
+        updates.append('executed = ?')
+        values.append(executed)
     if cost is not None:
         updates.append('cost = ?')
         values.append(cost)

@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 # Add Circle_wallet to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Circle_wallet'))
 
-from wallet_utils import (
+from core.wallet_utils import (
     get_wallet_balance,
     send_transaction,
     get_transactions,
     get_wallet_info,
     request_faucet
 )
-from db import (
+from core.db import (
     get_all_campaigns, 
     get_campaign_analytics,
     create_campaign,
@@ -212,16 +212,19 @@ async def request_faucet_endpoint(request: FaucetRequest):
 
 @app.post("/api/campaign/chat")
 async def campaign_chat(request: CampaignChatRequest):
-    """Handle campaign chat messages"""
+    """Handle campaign chat messages using LangChain agent"""
     try:
-        # Stub response - replace with actual AI/LLM integration
-        return {
-            'success': True,
-            'message': f'This is a placeholder response to: {request.message}',
-            'response': f'Campaign chat endpoint - message received for campaign {request.campaignId}',
-            'campaignCost': None
-        }
+        from agents import get_agent
+        
+        agent = get_agent()
+        result = agent.chat(
+            message=request.message,
+            conversation_history=request.conversationHistory
+        )
+        
+        return result
     except Exception as e:
+        logger.exception(f"Error in campaign chat: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/campaign/pay")
@@ -237,7 +240,7 @@ async def campaign_pay(request: CampaignPayRequest):
         )
         
         # Generate sample analytics for the paid campaign
-        from db import generate_sample_analytics
+        from core.db import generate_sample_analytics
         sample_analytics = generate_sample_analytics(request.campaignId)
         create_or_update_analytics(
             request.campaignId,

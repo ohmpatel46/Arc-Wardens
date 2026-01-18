@@ -7,9 +7,7 @@ export default function CampaignChat({
   isLoading, 
   onInputChange, 
   onSendMessage,
-  textareaRef,
-  showPaymentButton = false,
-  onPaymentClick
+  textareaRef
 }) {
   const messagesEndRef = useRef(null)
 
@@ -41,16 +39,6 @@ export default function CampaignChat({
                 }`}
               >
                 <div className="whitespace-pre-wrap break-words">{message.content}</div>
-                {message.campaignCost && (
-                  <div className="mt-2 pt-2 border-t border-gray-300">
-                    <p className="text-sm font-semibold text-amber-600">
-                      Campaign Cost: ${message.campaignCost}
-                    </p>
-                    <p className="text-xs text-gray-600 mt-1">
-                      Payment required to create this campaign
-                    </p>
-                  </div>
-                )}
               </div>
             </div>
           ))
@@ -87,15 +75,13 @@ export default function CampaignChat({
             disabled={isLoading}
             style={{ height: 'auto' }}
           />
-          {showPaymentButton && (
-            <button
-              onClick={onPaymentClick}
-              disabled={isLoading}
-              className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm whitespace-nowrap h-[44px]"
-            >
-              {isLoading ? 'Processing...' : 'Complete Payment'}
-            </button>
-          )}
+          <button
+            onClick={onSendMessage}
+            disabled={isLoading || !inputMessage.trim()}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm whitespace-nowrap h-[44px]"
+          >
+            {isLoading ? 'Sending...' : 'Send'}
+          </button>
         </div>
       </div>
     </>

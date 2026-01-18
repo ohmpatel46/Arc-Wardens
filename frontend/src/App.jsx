@@ -5,7 +5,6 @@ import WalletView from './components/wallet/WalletView'
 import CampaignChat from './components/campaigns/CampaignChat'
 import CampaignAnalytics from './components/campaigns/CampaignAnalytics'
 import CampaignAnalyticsView from './components/campaigns/CampaignAnalyticsView'
-import PaymentModal from './components/campaigns/PaymentModal'
 
 const API_BASE = '/api'
 
@@ -24,8 +23,6 @@ function App() {
   const [messages, setMessages] = useState([])
   const [inputMessage, setInputMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
-  const [campaignCost, setCampaignCost] = useState(null)
   const [editingCampaignId, setEditingCampaignId] = useState(null)
   const [editingName, setEditingName] = useState('')
   const textareaRef = useRef(null)
@@ -53,9 +50,9 @@ function App() {
   }, [])
 
   useEffect(() => {
-    setMessages(activeCampaign?.messages || [])
-    setCampaignCost(activeCampaign?.cost && !activeCampaign?.paid ? activeCampaign.cost : null)
-  }, [activeCampaignId, activeCampaign])
+    const campaign = campaigns.find(c => c.id === activeCampaignId)
+    setMessages(campaign?.messages || [])
+  }, [activeCampaignId, campaigns])
 
   const fetchCampaignsFromDB = async () => {
     try {
@@ -66,6 +63,7 @@ function App() {
         const localCampaigns = campaigns.filter(c => 
           !dbCampaigns.find(dbC => dbC.id === c.id)
         )
+        // Ensure all campaigns have proper paid field (default to false if undefined)
         setCampaigns([...dbCampaigns, ...localCampaigns])
       }
     } catch (error) {
@@ -196,12 +194,6 @@ function App() {
     setCampaigns(campaigns.map(c => c.id === activeCampaignId ? { ...c, ...updates } : c))
   }
 
-  const markAsPaid = () => {
-    updateCampaign({ paid: true, analytics: DEFAULT_ANALYTICS })
-    setCampaignCost(null)
-    setIsPaymentModalOpen(false)
-  }
-
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return
 
@@ -223,19 +215,12 @@ function App() {
       const responseData = response.data
       const aiMessage = {
         role: 'assistant',
-        content: responseData.message || responseData.response || responseData.content || 'No response received',
-        campaignCost: responseData.campaignCost || responseData.cost
+        content: responseData.message || responseData.response || responseData.content || 'No response received'
       }
 
       const updatedMessages = [...newMessages, aiMessage]
       setMessages(updatedMessages)
       updateCampaign({ messages: updatedMessages })
-
-      if (aiMessage.campaignCost && !activeCampaign?.paid) {
-        setCampaignCost(aiMessage.campaignCost)
-        updateCampaign({ cost: aiMessage.campaignCost })
-        setIsPaymentModalOpen(true)
-      }
     } catch (error) {
       console.error('Error sending message:', error)
       let errorMessage = 'Sorry, I encountered an error. Please try again.'
@@ -284,45 +269,6 @@ function App() {
     }
   }
 
-  const processPayment = async () => {
-    if (!activeCampaignId) return
-
-    const cost = campaignCost || activeCampaign?.cost || 0
-    setIsLoading(true)
-
-    try {
-      await axios.post(`${API_BASE}/campaign/pay`, {
-        campaignId: activeCampaignId,
-        amount: cost
-      }).catch(() => ({ data: { success: true } }))
-
-      markAsPaid()
-
-      // Update campaign in database after payment
-      try {
-        await axios.put(`${API_BASE}/campaign/update`, {
-          campaignId: activeCampaignId,
-          paid: true,
-          cost: cost,
-          status: 'active'
-        })
-        
-        // Also ensure campaign exists in DB
-        await axios.post(`${API_BASE}/campaign/create`, {
-          campaignId: activeCampaignId,
-          name: activeCampaign?.name || 'New Campaign',
-          messages: messages
-        })
-      } catch (err) {
-        console.error('Error updating campaign after payment:', err)
-      }
-    } catch (error) {
-      console.error('Payment error:', error)
-      markAsPaid()
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   const saveCampaignName = async (campaignId) => {
     if (editingName.trim()) {
@@ -450,19 +396,9 @@ function App() {
         ) : activeCampaignId ? (
           <>
             <div className="p-4 bg-white shadow-sm">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">
-                  {activeCampaign?.name}
-                  {!activeCampaign?.paid && (
-                    <span className="ml-2 text-sm font-normal text-amber-600">(Payment Required)</span>
-                  )}
-                </h2>
-                {(campaignCost || activeCampaign?.cost) && !activeCampaign?.paid && (
-                  <div className="text-sm text-gray-600">
-                    Cost: <span className="font-semibold text-amber-600">${campaignCost || activeCampaign?.cost}</span>
-                  </div>
-                )}
-              </div>
+              <h2 className="text-xl font-semibold text-gray-900">
+                {activeCampaign?.name}
+              </h2>
             </div>
 
             <CampaignChat
@@ -472,8 +408,6 @@ function App() {
               onInputChange={setInputMessage}
               onSendMessage={handleSendMessage}
               textareaRef={textareaRef}
-              showPaymentButton={!activeCampaign?.paid}
-              onPaymentClick={processPayment}
             />
           </>
         ) : (
@@ -492,16 +426,6 @@ function App() {
         )}
       </div>
 
-      <PaymentModal
-        isOpen={isPaymentModalOpen}
-        campaignCost={campaignCost}
-        isLoading={isLoading}
-        onClose={() => {
-          setIsPaymentModalOpen(false)
-          setCampaignCost(null)
-        }}
-        onPay={processPayment}
-      />
     </div>
   )
 }
