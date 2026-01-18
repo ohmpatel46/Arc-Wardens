@@ -1,13 +1,16 @@
 import { useRef, useEffect } from 'react'
 import LoadingSpinner from '../shared/LoadingSpinner'
 
-export default function CampaignChat({ 
-  messages, 
-  inputMessage, 
-  isLoading, 
-  onInputChange, 
+export default function CampaignChat({
+  messages,
+  inputMessage,
+  isLoading,
+  onInputChange,
   onSendMessage,
-  textareaRef
+
+  textareaRef,
+  onPay,
+  isPaid
 }) {
   const messagesEndRef = useRef(null)
 
@@ -32,11 +35,10 @@ export default function CampaignChat({
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-2xl min-w-[200px] rounded-lg px-4 py-3 ${
-                  message.role === 'user'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'bg-gray-100 text-gray-900 shadow-sm'
-                }`}
+                className={`max-w-2xl min-w-[200px] rounded-lg px-4 py-3 ${message.role === 'user'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-gray-100 text-gray-900 shadow-sm'
+                  }`}
               >
                 <div className="whitespace-pre-wrap break-words">{message.content}</div>
               </div>
@@ -82,6 +84,15 @@ export default function CampaignChat({
           >
             {isLoading ? 'Sending...' : 'Send'}
           </button>
+          {!isPaid && (
+            <button
+              onClick={onPay}
+              disabled={isLoading}
+              className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm whitespace-nowrap h-[44px]"
+            >
+              Pay $2
+            </button>
+          )}
         </div>
       </div>
     </>

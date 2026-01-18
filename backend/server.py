@@ -73,10 +73,10 @@ app.add_middleware(
 
 # Pydantic models for request/response validation
 class SendTransactionRequest(BaseModel):
-    walletId: str
-    receiverAddress: str
+    walletId: Optional[str] = None
+    receiverAddress: Optional[str] = None
     amount: str
-    tokenId: str
+    tokenId: Optional[str] = None
 
 class FaucetRequest(BaseModel):
     address: str
@@ -198,11 +198,19 @@ async def get_transactions_history(
 async def send_transaction_endpoint(request: SendTransactionRequest):
     """Send a transaction"""
     try:
+        # Get values from request or env
+        walletId = request.walletId or os.getenv('CIRCLE_SENDER_WALLET_ID')
+        receiverAddress = request.receiverAddress or os.getenv('CIRCLE_RECEIVER_ADDRESS')
+        tokenId = request.tokenId or os.getenv('CIRCLE_USDC_TESTNET_TOKEN_ID')
+        
+        if not walletId or not receiverAddress or not tokenId:
+             raise HTTPException(status_code=400, detail="Missing required parameters (walletId, receiverAddress, tokenId) and env vars not set")
+
         result = send_transaction(
-            request.walletId,
-            request.receiverAddress,
+            walletId,
+            receiverAddress,
             request.amount,
-            request.tokenId
+            tokenId
         )
         if result.get('error'):
             raise HTTPException(status_code=result.get('statusCode', 500), detail=result['error'])

@@ -5,6 +5,7 @@ import WalletView from './components/wallet/WalletView'
 import CampaignChat from './components/campaigns/CampaignChat'
 import CampaignAnalytics from './components/campaigns/CampaignAnalytics'
 import CampaignAnalyticsView from './components/campaigns/CampaignAnalyticsView'
+import ConfirmationModal from './components/shared/ConfirmationModal'
 
 const API_BASE = '/api'
 
@@ -39,7 +40,9 @@ function App() {
   const [isSending, setIsSending] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
+
   const [currentWalletAddress, setCurrentWalletAddress] = useState('')
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
 
   const activeCampaign = campaigns.find(c => c.id === activeCampaignId)
   const analytics = activeCampaign?.analytics || DEFAULT_ANALYTICS
@@ -91,7 +94,10 @@ function App() {
     try {
       // Fetch balance
       const balanceRes = await axios.get(`${API_BASE}/wallet/balance`, {
-        params: { walletId }
+        params: {
+          walletId,
+          _t: Date.now() // Cache buster
+        }
       })
       if (balanceRes.data.success) {
         setWalletBalance(balanceRes.data)
@@ -247,6 +253,56 @@ function App() {
         role: 'assistant',
         content: errorMessage
       }])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const initiatePayment = () => {
+    if (isLoading || !activeCampaignId) return
+    setShowPaymentModal(true)
+  }
+
+  const processPayment = async () => {
+    setIsLoading(true)
+    try {
+      // 1. Send transaction (walletId will be picked up from .env by backend if empty)
+      const sendRes = await axios.post(`${API_BASE}/wallet/send`, {
+        walletId: '',
+        receiverAddress: '',
+        amount: '2',
+        tokenId: ''
+      })
+
+      if (sendRes.data.success || sendRes.data.challengeId) {
+        // 2. Mark campaign as paid
+        const payRes = await axios.post(`${API_BASE}/campaign/pay`, {
+          campaignId: activeCampaignId,
+          amount: 2
+        })
+
+        if (payRes.data.success) {
+          // Update local state
+          setCampaigns(campaigns.map(c =>
+            c.id === activeCampaignId ? { ...c, paid: true, analytics: DEFAULT_ANALYTICS } : c // Reset or set analytics
+          ))
+
+          // Refresh campaigns to get the full updated object including generated analytics from backend
+          fetchCampaignsFromDB()
+
+          setShowPaymentModal(false)
+
+          // Refresh wallet balance immediately and multiple times to capture the update
+          fetchWalletData()
+          setTimeout(() => fetchWalletData(), 2000)
+          setTimeout(() => fetchWalletData(), 4000)
+          setTimeout(() => fetchWalletData(), 6000)
+        }
+      }
+    } catch (error) {
+      console.error('Payment failed:', error)
+      alert(`Payment failed: ${error.response?.data?.detail || error.message}`)
+      setShowPaymentModal(false)
     } finally {
       setIsLoading(false)
     }
@@ -438,6 +494,18 @@ function App() {
               onInputChange={setInputMessage}
               onSendMessage={handleSendMessage}
               textareaRef={textareaRef}
+              onPay={initiatePayment}
+              isPaid={activeCampaign?.paid}
+            />
+
+            <ConfirmationModal
+              isOpen={showPaymentModal}
+              onClose={() => setShowPaymentModal(false)}
+              onConfirm={processPayment}
+              title="Confirm Payment"
+              message="Are you sure you want to pay $2.00 USDC to activate this campaign? This action cannot be undone."
+              confirmText="Pay $2.00"
+              isLoading={isLoading}
             />
           </>
         ) : (
@@ -456,7 +524,7 @@ function App() {
         )}
       </div>
 
-    </div>
+    </div >
   )
 }
 
