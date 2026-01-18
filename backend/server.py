@@ -7,7 +7,12 @@ from typing import Optional
 import sys
 import os
 import time
+import time
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables from root .env
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # Configure logging
 logging.basicConfig(
@@ -100,7 +105,7 @@ class CampaignUpdateRequest(BaseModel):
 
 
 @app.get("/api/wallet/balance")
-async def get_balance(request: Request, walletId: str = Query(..., description="Wallet ID")):
+async def get_balance(request: Request, walletId: Optional[str] = Query(None, description="Wallet ID")):
     """Get wallet balance"""
     try:
         logger.info(f"GET /api/wallet/balance - walletId: {walletId}")
@@ -108,7 +113,11 @@ async def get_balance(request: Request, walletId: str = Query(..., description="
         logger.info(f"All query params: {request.query_params}")
         
         if not walletId:
-            logger.error("walletId is empty")
+            walletId = os.getenv('CIRCLE_WALLET_ID')
+            logger.info(f"Using walletId from env: {walletId}")
+
+        if not walletId:
+            logger.error("walletId is empty and not in env")
             raise HTTPException(status_code=400, detail="walletId parameter required")
         
         result = get_wallet_balance(walletId)
@@ -126,12 +135,15 @@ async def get_balance(request: Request, walletId: str = Query(..., description="
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/wallet/info")
-async def get_info(request: Request, walletId: str = Query(..., description="Wallet ID")):
+async def get_info(request: Request, walletId: Optional[str] = Query(None, description="Wallet ID")):
     """Get wallet information"""
     try:
         logger.info(f"GET /api/wallet/info - walletId: {walletId}")
         logger.info(f"Query params: {dict(request.query_params)}")
         
+        if not walletId:
+            walletId = os.getenv('CIRCLE_WALLET_ID')
+
         if not walletId:
             logger.error("walletId is empty")
             raise HTTPException(status_code=400, detail="walletId parameter required")
@@ -153,7 +165,7 @@ async def get_info(request: Request, walletId: str = Query(..., description="Wal
 @app.get("/api/wallet/transactions")
 async def get_transactions_history(
     request: Request,
-    walletId: str = Query(..., description="Wallet ID"),
+    walletId: Optional[str] = Query(None, description="Wallet ID"),
     pageSize: int = Query(50, description="Number of transactions to return")
 ):
     """Get transaction history"""
@@ -161,6 +173,9 @@ async def get_transactions_history(
         logger.info(f"GET /api/wallet/transactions - walletId: {walletId}, pageSize: {pageSize}")
         logger.info(f"Query params: {dict(request.query_params)}")
         
+        if not walletId:
+            walletId = os.getenv('CIRCLE_WALLET_ID')
+
         if not walletId:
             logger.error("walletId is empty")
             raise HTTPException(status_code=400, detail="walletId parameter required")

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import Sidebar from './components/layout/Sidebar'
 import WalletView from './components/wallet/WalletView'
@@ -26,9 +26,9 @@ function App() {
   const [editingCampaignId, setEditingCampaignId] = useState(null)
   const [editingName, setEditingName] = useState('')
   const textareaRef = useRef(null)
-  
+
   // Wallet state
-  const [walletId, setWalletId] = useState(localStorage.getItem('walletId') || '')
+  const [walletId, setWalletId] = useState(import.meta.env.VITE_WALLET_ID || localStorage.getItem('walletId') || '')
   const [walletBalance, setWalletBalance] = useState(null)
   const [walletInfo, setWalletInfo] = useState(null)
   const [transactions, setTransactions] = useState([])
@@ -60,7 +60,7 @@ function App() {
       if (response.data.success) {
         // Merge with local state campaigns (for messages that aren't in DB yet)
         const dbCampaigns = response.data.campaigns || []
-        const localCampaigns = campaigns.filter(c => 
+        const localCampaigns = campaigns.filter(c =>
           !dbCampaigns.find(dbC => dbC.id === c.id)
         )
         // Ensure all campaigns have proper paid field (default to false if undefined)
@@ -83,9 +83,10 @@ function App() {
     }
   }, [showWallet, walletId])
 
-  const fetchWalletData = async () => {
-    if (!walletId) return
-    
+  const fetchWalletData = useCallback(async () => {
+
+    // if (!walletId) return - Fetch even if empty, allow backend to use env var
+
     setIsLoadingWallet(true)
     try {
       // Fetch balance
@@ -120,7 +121,14 @@ function App() {
     } finally {
       setIsLoadingWallet(false)
     }
-  }
+  }, [walletId])
+
+  // Poll for wallet data
+  useEffect(() => {
+    fetchWalletData()
+    const interval = setInterval(fetchWalletData, 10000) // Poll every 10 seconds
+    return () => clearInterval(interval)
+  }, [fetchWalletData])
 
   const handleSendTransaction = async () => {
     if (!walletId || !sendAmount || !sendAddress || !sendTokenId || isSending) return
@@ -224,20 +232,20 @@ function App() {
     } catch (error) {
       console.error('Error sending message:', error)
       let errorMessage = 'Sorry, I encountered an error. Please try again.'
-      
+
       if (error.response) {
-        errorMessage = error.response.data?.error || 
-                      error.response.data?.message || 
-                      `Server error: ${error.response.status} ${error.response.statusText}`
+        errorMessage = error.response.data?.error ||
+          error.response.data?.message ||
+          `Server error: ${error.response.status} ${error.response.statusText}`
       } else if (error.request) {
         errorMessage = 'Unable to reach the server. Please check your connection.'
       } else {
         errorMessage = error.message || errorMessage
       }
-      
-      setMessages([...newMessages, { 
-        role: 'assistant', 
-        content: errorMessage 
+
+      setMessages([...newMessages, {
+        role: 'assistant',
+        content: errorMessage
       }])
     } finally {
       setIsLoading(false)
@@ -251,12 +259,12 @@ function App() {
       messages: [],
       paid: false
     }
-    
+
     // Add to local state immediately
     setCampaigns([newCampaign, ...campaigns])
     setActiveCampaignId(newCampaign.id)
     setMessages([])
-    
+
     // Save to database
     try {
       await axios.post(`${API_BASE}/campaign/create`, {
@@ -275,7 +283,7 @@ function App() {
       const newName = editingName.trim()
       // Update local state
       setCampaigns(campaigns.map(c => c.id === campaignId ? { ...c, name: newName } : c))
-      
+
       // Update in database
       try {
         await axios.put(`${API_BASE}/campaign/update`, {
@@ -300,7 +308,7 @@ function App() {
       } catch (error) {
         console.error('Error deleting campaign from database:', error)
       }
-      
+
       // Update local state
       const updatedCampaigns = campaigns.filter(c => c.id !== campaignId)
       setCampaigns(updatedCampaigns)
@@ -367,7 +375,29 @@ function App() {
         onAnalyticsToggle={handleAnalyticsToggle}
       />
 
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col relative">
+        {/* Wallet Balance Widget */}
+        <div className="absolute top-4 right-4 z-50">
+          <div className="bg-white/90 backdrop-blur-md shadow-lg border border-gray-200 rounded-xl px-4 py-2 flex items-center gap-3 transition-all hover:shadow-xl hover:scale-105">
+            <div className="flex flex-col items-end">
+              <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">Balance</span>
+              <span className="text-gray-900 font-bold font-mono">
+                {walletBalance?.rawData?.data?.tokenBalances?.[0]?.amount
+                  ? `$${parseFloat(walletBalance.rawData.data.tokenBalances[0].amount).toFixed(2)}`
+                  : walletBalance?.usdcBalance?.amount
+                    ? `$${parseFloat(walletBalance.usdcBalance.amount).toFixed(2)}`
+                    : walletBalance ? '$0.00' : '...'}
+                <span className="text-xs text-gray-500 ml-1">USDC</span>
+              </span>
+            </div>
+            <div className="h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+                <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd" />
+              </svg>
+            </div>
+          </div>
+        </div>
         {showAnalytics ? (
           <CampaignAnalyticsView />
         ) : showWallet ? (
