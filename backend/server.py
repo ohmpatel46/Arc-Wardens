@@ -257,7 +257,7 @@ async def campaign_pay(request: CampaignPayRequest):
         # Update campaign as paid in database
         update_campaign(
             request.campaignId,
-            paid=True,
+            executed=True,
             cost=request.amount,
             status='active'
         )
@@ -316,7 +316,7 @@ async def campaign_update(request: CampaignUpdateRequest):
         update_campaign(
             request.campaignId,
             name=request.name,
-            paid=request.paid,
+            executed=request.paid,
             cost=request.cost,
             status=request.status
         )

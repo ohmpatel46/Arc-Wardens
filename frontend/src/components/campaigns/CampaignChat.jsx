@@ -10,7 +10,8 @@ export default function CampaignChat({
 
   textareaRef,
   onPay,
-  isPaid
+  isPaid,
+  campaignCost = 1
 }) {
   const messagesEndRef = useRef(null)
 
@@ -90,7 +91,7 @@ export default function CampaignChat({
               disabled={isLoading}
               className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm whitespace-nowrap h-[44px]"
             >
-              Pay $2
+              Pay ${campaignCost}
             </button>
           )}
         </div>

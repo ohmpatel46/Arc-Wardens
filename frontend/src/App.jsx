@@ -5,16 +5,19 @@ import WalletView from './components/wallet/WalletView'
 import CampaignChat from './components/campaigns/CampaignChat'
 import CampaignAnalytics from './components/campaigns/CampaignAnalytics'
 import CampaignAnalyticsView from './components/campaigns/CampaignAnalyticsView'
+import LoadingSpinner from './components/shared/LoadingSpinner'
 import ConfirmationModal from './components/shared/ConfirmationModal'
 
 const API_BASE = '/api'
 
-const DEFAULT_ANALYTICS = {
+export const DEFAULT_ANALYTICS = {
   emailsSent: 1250,
   emailsOpened: 342,
   replies: 28,
   bounceRate: 2.4
 }
+
+export const CAMPAIGN_COST = 1
 
 function App() {
   const [campaigns, setCampaigns] = useState([])
@@ -43,6 +46,11 @@ function App() {
 
   const [currentWalletAddress, setCurrentWalletAddress] = useState('')
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+
+  // Delete confirmation state
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [campaignToDelete, setCampaignToDelete] = useState(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const activeCampaign = campaigns.find(c => c.id === activeCampaignId)
   const analytics = activeCampaign?.analytics || DEFAULT_ANALYTICS
@@ -270,7 +278,7 @@ function App() {
       const sendRes = await axios.post(`${API_BASE}/wallet/send`, {
         walletId: '',
         receiverAddress: '',
-        amount: '2',
+        amount: CAMPAIGN_COST.toString(),
         tokenId: ''
       })
 
@@ -278,7 +286,7 @@ function App() {
         // 2. Mark campaign as paid
         const payRes = await axios.post(`${API_BASE}/campaign/pay`, {
           campaignId: activeCampaignId,
-          amount: 2
+          amount: CAMPAIGN_COST
         })
 
         if (payRes.data.success) {
@@ -354,21 +362,26 @@ function App() {
     setEditingName('')
   }
 
-  const deleteCampaign = async (campaignId) => {
-    if (window.confirm('Are you sure you want to delete this campaign?')) {
+  const handleDeleteClick = (campaignId) => {
+    setCampaignToDelete(campaignId)
+    setShowDeleteModal(true)
+  }
+
+  const confirmDeleteCampaign = async () => {
+    if (!campaignToDelete) return
+
+    setIsDeleting(true)
+    try {
       // Delete from database
-      try {
-        await axios.delete(`${API_BASE}/campaign/delete`, {
-          params: { campaignId }
-        })
-      } catch (error) {
-        console.error('Error deleting campaign from database:', error)
-      }
+      await axios.delete(`${API_BASE}/campaign/delete`, {
+        params: { campaignId: campaignToDelete }
+      })
 
       // Update local state
-      const updatedCampaigns = campaigns.filter(c => c.id !== campaignId)
+      const updatedCampaigns = campaigns.filter(c => c.id !== campaignToDelete)
       setCampaigns(updatedCampaigns)
-      if (activeCampaignId === campaignId) {
+
+      if (activeCampaignId === campaignToDelete) {
         // If there are other campaigns, select the first one
         if (updatedCampaigns.length > 0) {
           setActiveCampaignId(updatedCampaigns[0].id)
@@ -378,6 +391,13 @@ function App() {
           setMessages([])
         }
       }
+    } catch (error) {
+      console.error('Error deleting campaign from database:', error)
+      alert(`Failed to delete campaign: ${error.message}`)
+    } finally {
+      setIsDeleting(false)
+      setShowDeleteModal(false)
+      setCampaignToDelete(null)
     }
   }
 
@@ -425,7 +445,7 @@ function App() {
           setEditingCampaignId(null)
           setEditingName('')
         }}
-        onDelete={deleteCampaign}
+        onDelete={handleDeleteClick}
         onNameChange={setEditingName}
         onWalletToggle={handleWalletToggle}
         onAnalyticsToggle={handleAnalyticsToggle}
@@ -439,9 +459,9 @@ function App() {
               <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">Balance</span>
               <span className="text-gray-900 font-bold font-mono">
                 {walletBalance?.rawData?.data?.tokenBalances?.[0]?.amount
-                  ? `$${parseFloat(walletBalance.rawData.data.tokenBalances[0].amount).toFixed(2)}`
+                  ? `$${parseFloat(walletBalance.rawData.data.tokenBalances[0].amount).toFixed(0.1)}`
                   : walletBalance?.usdcBalance?.amount
-                    ? `$${parseFloat(walletBalance.usdcBalance.amount).toFixed(2)}`
+                    ? `$${parseFloat(walletBalance.usdcBalance.amount).toFixed(0.1)}`
                     : walletBalance ? '$0.00' : '...'}
                 <span className="text-xs text-gray-500 ml-1">USDC</span>
               </span>
@@ -496,6 +516,7 @@ function App() {
               textareaRef={textareaRef}
               onPay={initiatePayment}
               isPaid={activeCampaign?.paid}
+              campaignCost={CAMPAIGN_COST}
             />
 
             <ConfirmationModal
@@ -503,8 +524,8 @@ function App() {
               onClose={() => setShowPaymentModal(false)}
               onConfirm={processPayment}
               title="Confirm Payment"
-              message="Are you sure you want to pay $2.00 USDC to activate this campaign? This action cannot be undone."
-              confirmText="Pay $2.00"
+              message={`Are you sure you want to pay $${CAMPAIGN_COST} USDC to activate this campaign? This action cannot be undone.`}
+              confirmText={`Pay $${CAMPAIGN_COST}`}
               isLoading={isLoading}
             />
           </>
@@ -524,6 +545,16 @@ function App() {
         )}
       </div>
 
+      <ConfirmationModal
+        isOpen={showDeleteModal}
+        title="Delete Campaign"
+        message="Are you sure you want to delete this campaign? This action cannot be undone and all associated data including analytics will be permanently removed."
+        confirmText="Delete Campaign"
+        confirmButtonClass="bg-red-600 hover:bg-red-700"
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={confirmDeleteCampaign}
+        isLoading={isDeleting}
+      />
     </div >
   )
 }

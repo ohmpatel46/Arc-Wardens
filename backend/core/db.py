@@ -84,15 +84,18 @@ def get_all_campaigns():
     conn.close()
     
     campaigns = []
+    campaigns = []
     for row in rows:
         # Handle both 'paid' (old) and 'executed' (new) columns for migration
-        executed = bool(row.get('executed') or row.get('paid') or False)
+        # SQLite Row doesn't support .get(), so convert to dict
+        row_dict = dict(row)
+        executed = bool(row_dict.get('executed') or row_dict.get('paid') or False)
         
         campaign = {
             'id': row['id'],
             'name': row['name'],
             'createdAt': row['created_at'],
-            'executed': executed,
+            'paid': executed, # Return as 'paid' for frontend compatibility
             'cost': row['cost'],
             'status': row['status']
         }
@@ -129,13 +132,14 @@ def get_campaign_analytics(campaign_id):
         return None
     
     # Handle both 'paid' (old) and 'executed' (new) columns for migration
-    executed = bool(row.get('executed') or row.get('paid') or False)
+    row_dict = dict(row)
+    executed = bool(row_dict.get('executed') or row_dict.get('paid') or False)
     
     campaign = {
         'id': row['id'],
         'name': row['name'],
         'createdAt': row['created_at'],
-        'executed': executed,
+        'paid': executed,
         'cost': row['cost'],
         'status': row['status']
     }

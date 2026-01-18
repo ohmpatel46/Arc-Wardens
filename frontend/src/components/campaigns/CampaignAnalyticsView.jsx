@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import CampaignAnalytics from './CampaignAnalytics'
 import LoadingSpinner from '../shared/LoadingSpinner'
+import { DEFAULT_ANALYTICS } from '../../App'
 
 const API_BASE = '/api'
 
@@ -29,10 +30,14 @@ export default function CampaignAnalyticsView() {
     try {
       const response = await axios.get(`${API_BASE}/campaigns`)
       if (response.data.success) {
-        setCampaigns(response.data.campaigns || [])
-        // Auto-select first campaign if available
-        if (response.data.campaigns && response.data.campaigns.length > 0) {
-          setSelectedCampaignId(response.data.campaigns[0].id)
+        // Filter only paid campaigns
+        const allCampaigns = response.data.campaigns || []
+        const paidCampaigns = allCampaigns.filter(c => c.paid)
+        setCampaigns(paidCampaigns)
+
+        // Auto-select first paid campaign if available
+        if (paidCampaigns.length > 0) {
+          setSelectedCampaignId(paidCampaigns[0].id)
         }
       }
     } catch (error) {
@@ -101,9 +106,9 @@ export default function CampaignAnalyticsView() {
               </div>
             </div>
           ) : selectedCampaign ? (
-            <CampaignAnalytics 
-              campaign={selectedCampaign} 
-              analytics={selectedCampaign.analytics || {}} 
+            <CampaignAnalytics
+              campaign={selectedCampaign}
+              analytics={selectedCampaign.analytics || DEFAULT_ANALYTICS}
             />
           ) : selectedCampaignId ? (
             <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">
