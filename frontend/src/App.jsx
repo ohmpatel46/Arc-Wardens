@@ -13,6 +13,7 @@ const DEFAULT_ANALYTICS = {
 function App() {
   const [campaigns, setCampaigns] = useState([])
   const [activeCampaignId, setActiveCampaignId] = useState(null)
+  const [showWallet, setShowWallet] = useState(false)
   const [messages, setMessages] = useState([])
   const [inputMessage, setInputMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -22,6 +23,20 @@ function App() {
   const [editingName, setEditingName] = useState('')
   const messagesEndRef = useRef(null)
   const textareaRef = useRef(null)
+  
+  // Wallet state
+  const [walletId, setWalletId] = useState(localStorage.getItem('walletId') || '')
+  const [walletBalance, setWalletBalance] = useState(null)
+  const [walletInfo, setWalletInfo] = useState(null)
+  const [transactions, setTransactions] = useState([])
+  const [isLoadingWallet, setIsLoadingWallet] = useState(false)
+  const [sendAmount, setSendAmount] = useState('')
+  const [sendAddress, setSendAddress] = useState('')
+  const [sendTokenId, setSendTokenId] = useState('')
+  const [isSending, setIsSending] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
+  const [currentWalletAddress, setCurrentWalletAddress] = useState('')
 
   const activeCampaign = campaigns.find(c => c.id === activeCampaignId)
   const analytics = activeCampaign?.analytics || {}
@@ -34,6 +49,124 @@ function App() {
     setMessages(activeCampaign?.messages || [])
     setCampaignCost(activeCampaign?.cost && !activeCampaign?.paid ? activeCampaign.cost : null)
   }, [activeCampaignId, activeCampaign])
+
+  useEffect(() => {
+    if (walletId) {
+      localStorage.setItem('walletId', walletId)
+    }
+  }, [walletId])
+
+  useEffect(() => {
+    if (showWallet && walletId) {
+      fetchWalletData()
+    }
+  }, [showWallet, walletId])
+
+  const fetchWalletData = async () => {
+    if (!walletId) return
+    
+    setIsLoadingWallet(true)
+    try {
+      // Fetch balance
+      const balanceRes = await axios.get(`${API_BASE}/wallet/balance`, {
+        params: { walletId }
+      })
+      if (balanceRes.data.success) {
+        setWalletBalance(balanceRes.data)
+      }
+
+      // Fetch wallet info
+      const infoRes = await axios.get(`${API_BASE}/wallet/info`, {
+        params: { walletId }
+      })
+      if (infoRes.data.success) {
+        setWalletInfo(infoRes.data.wallet)
+        // Store wallet address for transaction comparison
+        if (infoRes.data.wallet?.address) {
+          setCurrentWalletAddress(infoRes.data.wallet.address.toLowerCase())
+        }
+      }
+
+      // Fetch transactions
+      const txRes = await axios.get(`${API_BASE}/wallet/transactions`, {
+        params: { walletId, pageSize: 50 }
+      })
+      if (txRes.data.success) {
+        setTransactions(txRes.data.transactions || [])
+      }
+    } catch (error) {
+      console.error('Error fetching wallet data:', error)
+    } finally {
+      setIsLoadingWallet(false)
+    }
+  }
+
+  const handleSendTransaction = async () => {
+    if (!walletId || !sendAmount || !sendAddress || !sendTokenId || isSending) return
+
+    setIsSending(true)
+    try {
+      const response = await axios.post(`${API_BASE}/wallet/send`, {
+        walletId,
+        receiverAddress: sendAddress,
+        amount: sendAmount,
+        tokenId: sendTokenId
+      })
+
+      if (response.data.success) {
+        setSendAmount('')
+        setSendAddress('')
+        setSendTokenId('')
+        setSuccessMessage('Transaction submitted successfully!')
+        setErrorMessage('')
+        // Refresh wallet data to update balance
+        setTimeout(() => fetchWalletData(), 2000)
+        // Clear success message after 5 seconds
+        setTimeout(() => setSuccessMessage(''), 5000)
+      } else {
+        setErrorMessage(`Transaction failed: ${response.data.error}`)
+        setSuccessMessage('')
+        setTimeout(() => setErrorMessage(''), 5000)
+      }
+    } catch (error) {
+      console.error('Error sending transaction:', error)
+      setErrorMessage(`Error: ${error.response?.data?.error || error.message}`)
+      setSuccessMessage('')
+      setTimeout(() => setErrorMessage(''), 5000)
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const handleRequestFaucet = async () => {
+    if (!walletInfo?.address) return
+
+    setIsLoadingWallet(true)
+    try {
+      const response = await axios.post(`${API_BASE}/wallet/faucet`, {
+        address: walletInfo.address,
+        blockchain: 'ARC-TESTNET'
+      })
+
+      if (response.data.success) {
+        setSuccessMessage('Faucet request submitted! Check your balance in a few moments.')
+        setErrorMessage('')
+        setTimeout(() => fetchWalletData(), 3000)
+        setTimeout(() => setSuccessMessage(''), 5000)
+      } else {
+        setErrorMessage(`Faucet request failed: ${response.data.error}`)
+        setSuccessMessage('')
+        setTimeout(() => setErrorMessage(''), 5000)
+      }
+    } catch (error) {
+      console.error('Error requesting faucet:', error)
+      setErrorMessage(`Error: ${error.response?.data?.error || error.message}`)
+      setSuccessMessage('')
+      setTimeout(() => setErrorMessage(''), 5000)
+    } finally {
+      setIsLoadingWallet(false)
+    }
+  }
 
   const updateCampaign = (updates) => {
     setCampaigns(campaigns.map(c => c.id === activeCampaignId ? { ...c, ...updates } : c))
@@ -157,10 +290,17 @@ function App() {
 
   const deleteCampaign = (campaignId) => {
     if (window.confirm('Are you sure you want to delete this campaign?')) {
-      setCampaigns(campaigns.filter(c => c.id !== campaignId))
+      const updatedCampaigns = campaigns.filter(c => c.id !== campaignId)
+      setCampaigns(updatedCampaigns)
       if (activeCampaignId === campaignId) {
-        setActiveCampaignId(null)
-        setMessages([])
+        // If there are other campaigns, select the first one
+        if (updatedCampaigns.length > 0) {
+          setActiveCampaignId(updatedCampaigns[0].id)
+        } else {
+          // Only set to null if no campaigns remain
+          setActiveCampaignId(null)
+          setMessages([])
+        }
       }
     }
   }
@@ -196,7 +336,10 @@ function App() {
                       ? 'bg-blue-50 border border-blue-200'
                       : 'hover:bg-gray-100 border border-transparent'
                   }`}
-                  onClick={() => setActiveCampaignId(campaign.id)}
+                  onClick={() => {
+                    setActiveCampaignId(campaign.id)
+                    setShowWallet(false) // Close wallet view when selecting a campaign
+                  }}
                 >
                   {editingCampaignId === campaign.id ? (
                     <input
@@ -263,10 +406,293 @@ function App() {
             </div>
           )}
         </div>
+        
+        {/* Your Wallet Section - Docked at Bottom */}
+        <div className="border-t border-gray-200 p-4 bg-white">
+          <button
+            onClick={() => {
+              const newWalletState = !showWallet
+              setShowWallet(newWalletState)
+              if (newWalletState) {
+                // When opening wallet, close any active campaign
+                setActiveCampaignId(null)
+              }
+            }}
+            className={`w-full flex items-center justify-between p-3 rounded-md transition ${
+              showWallet
+                ? 'bg-blue-50 border border-blue-200 text-blue-700'
+                : 'hover:bg-gray-100 border border-transparent text-gray-700'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+              </svg>
+              <span className="font-semibold text-sm">Your Wallet</span>
+            </div>
+            {showWallet && (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 flex flex-col">
-        {activeCampaignId ? (
+        {showWallet ? (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="p-4 bg-white shadow-sm border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-900">Your Wallet</h2>
+              <p className="text-sm text-gray-500 mt-1">Manage your Circle wallet transactions</p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="max-w-4xl mx-auto space-y-6">
+                {/* Wallet ID Input */}
+                <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Wallet ID
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={walletId}
+                      onChange={(e) => setWalletId(e.target.value)}
+                      placeholder="Enter your Circle wallet ID"
+                      className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <button
+                      onClick={fetchWalletData}
+                      disabled={!walletId || isLoadingWallet}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isLoadingWallet ? 'Loading...' : 'Load'}
+                    </button>
+                  </div>
+                </div>
+
+                {walletId && (
+                  <>
+                    {/* Success/Error Messages for Wallet Operations */}
+                    {successMessage && (
+                      <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
+                        <p className="text-sm font-medium text-green-800">{successMessage}</p>
+                      </div>
+                    )}
+                    {errorMessage && (
+                      <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                        <p className="text-sm font-medium text-red-800">{errorMessage}</p>
+                      </div>
+                    )}
+                    
+                    {/* Balance Display */}
+                    {walletBalance && (
+                      <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Balance</h3>
+                        {walletBalance.usdcBalance ? (
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-600">USDC</span>
+                              <span className="text-2xl font-bold text-gray-900">
+                                {walletBalance.usdcBalance.amount || '0'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              Token: {walletBalance.usdcBalance.token?.symbol || 'USDC'}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-gray-500">No USDC balance found</div>
+                        )}
+                        {walletInfo && (
+                          <div className="mt-4 pt-4 border-t border-gray-200">
+                            <div className="text-sm text-gray-600">
+                              <div className="mb-1">Address: <span className="font-mono text-xs">{walletInfo.address}</span></div>
+                              <div>Blockchain: {walletInfo.blockchain || 'ARC-TESTNET'}</div>
+                            </div>
+                            <button
+                              onClick={handleRequestFaucet}
+                              disabled={isLoadingWallet}
+                              className="mt-3 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium transition disabled:opacity-50"
+                            >
+                              Request Test USDC
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Send Transaction */}
+                    <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Send Transaction</h3>
+                      
+                      {/* Success/Error Messages */}
+                      {successMessage && (
+                        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
+                          <p className="text-sm font-medium text-green-800">{successMessage}</p>
+                        </div>
+                      )}
+                      {errorMessage && (
+                        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                          <p className="text-sm font-medium text-red-800">{errorMessage}</p>
+                        </div>
+                      )}
+                      
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Receiver Address
+                          </label>
+                          <input
+                            type="text"
+                            value={sendAddress}
+                            onChange={(e) => setSendAddress(e.target.value)}
+                            placeholder="0x..."
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Amount
+                          </label>
+                          <input
+                            type="text"
+                            value={sendAmount}
+                            onChange={(e) => setSendAmount(e.target.value)}
+                            placeholder="1.0"
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Token ID
+                          </label>
+                          <input
+                            type="text"
+                            value={sendTokenId}
+                            onChange={(e) => setSendTokenId(e.target.value)}
+                            placeholder="Enter token ID"
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        <button
+                          onClick={handleSendTransaction}
+                          disabled={!sendAmount || !sendAddress || !sendTokenId || isSending}
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-md transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSending ? 'Sending...' : 'Send Transaction'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Transaction History */}
+                    <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-semibold text-gray-900">Transaction History</h3>
+                        <button
+                          onClick={fetchWalletData}
+                          disabled={isLoadingWallet}
+                          className="text-sm text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
+                        >
+                          Refresh
+                        </button>
+                      </div>
+                      {isLoadingWallet ? (
+                        <div className="text-center py-8 text-gray-500">Loading transactions...</div>
+                      ) : transactions.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">No transactions found</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {transactions.map((tx, index) => {
+                            // Check if From or To address matches current wallet address
+                            const fromAddress = tx.sourceAddress?.toLowerCase() || ''
+                            const toAddress = tx.destinationAddress?.toLowerCase() || ''
+                            const isFromYou = currentWalletAddress && fromAddress === currentWalletAddress
+                            const isToYou = currentWalletAddress && toAddress === currentWalletAddress
+                            
+                            // Determine transaction type (sent or received)
+                            const txType = isFromYou ? 'sent' : isToYou ? 'received' : 'unknown'
+                            
+                            return (
+                            <div
+                              key={tx.id || index}
+                              className={`border rounded-md p-4 transition ${
+                                txType === 'sent' 
+                                  ? 'border-red-200 bg-red-50/30 hover:bg-red-50/50' 
+                                  : txType === 'received'
+                                  ? 'border-green-200 bg-green-50/30 hover:bg-green-50/50'
+                                  : 'border-gray-200 bg-white hover:bg-gray-50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium text-gray-900">
+                                    {tx.type || 'Transaction'}
+                                  </span>
+                                  {txType === 'sent' && (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 font-medium">
+                                      Sent
+                                    </span>
+                                  )}
+                                  {txType === 'received' && (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700 font-medium">
+                                      Received
+                                    </span>
+                                  )}
+                                </div>
+                                <span className={`text-xs px-2 py-1 rounded ${
+                                  tx.state === 'COMPLETE' ? 'bg-green-100 text-green-700' :
+                                  tx.state === 'PENDING' ? 'bg-yellow-100 text-yellow-700' :
+                                  tx.state === 'FAILED' ? 'bg-red-100 text-red-700' :
+                                  'bg-gray-100 text-gray-700'
+                                }`}>
+                                  {tx.state || 'UNKNOWN'}
+                                </span>
+                              </div>
+                              {tx.id && (
+                                <div className="text-xs text-gray-500 font-mono mb-1">
+                                  ID: {tx.id}
+                                </div>
+                              )}
+                              {tx.sourceAddress && (
+                                <div className="text-xs text-gray-600">
+                                  From: <span className="font-mono">{tx.sourceAddress}</span>
+                                  {isFromYou && (
+                                    <span className="ml-2 text-blue-600 font-medium">(you)</span>
+                                  )}
+                                </div>
+                              )}
+                              {tx.destinationAddress && (
+                                <div className="text-xs text-gray-600">
+                                  To: <span className="font-mono">{tx.destinationAddress}</span>
+                                  {isToYou && (
+                                    <span className="ml-2 text-blue-600 font-medium">(you)</span>
+                                  )}
+                                </div>
+                              )}
+                              {tx.amounts && tx.amounts.length > 0 && (
+                                <div className="text-sm text-gray-700 mt-2">
+                                  Amount: {tx.amounts.join(', ')}
+                                </div>
+                              )}
+                              {tx.createdAt && (
+                                <div className="text-xs text-gray-500 mt-2">
+                                  {new Date(tx.createdAt).toLocaleString()}
+                                </div>
+                              )}
+                            </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : activeCampaignId ? (
           activeCampaign?.paid ? (
             <>
               <div className="p-4 bg-white shadow-sm border-b border-gray-200">
