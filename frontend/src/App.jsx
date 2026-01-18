@@ -4,6 +4,7 @@ import Sidebar from './components/layout/Sidebar'
 import WalletView from './components/wallet/WalletView'
 import CampaignChat from './components/campaigns/CampaignChat'
 import CampaignAnalytics from './components/campaigns/CampaignAnalytics'
+import CampaignAnalyticsView from './components/campaigns/CampaignAnalyticsView'
 import PaymentModal from './components/campaigns/PaymentModal'
 
 const API_BASE = '/api'
@@ -19,6 +20,7 @@ function App() {
   const [campaigns, setCampaigns] = useState([])
   const [activeCampaignId, setActiveCampaignId] = useState(null)
   const [showWallet, setShowWallet] = useState(false)
+  const [showAnalytics, setShowAnalytics] = useState(false)
   const [messages, setMessages] = useState([])
   const [inputMessage, setInputMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -45,10 +47,31 @@ function App() {
   const activeCampaign = campaigns.find(c => c.id === activeCampaignId)
   const analytics = activeCampaign?.analytics || DEFAULT_ANALYTICS
 
+  // Load campaigns from database on mount
+  useEffect(() => {
+    fetchCampaignsFromDB()
+  }, [])
+
   useEffect(() => {
     setMessages(activeCampaign?.messages || [])
     setCampaignCost(activeCampaign?.cost && !activeCampaign?.paid ? activeCampaign.cost : null)
   }, [activeCampaignId, activeCampaign])
+
+  const fetchCampaignsFromDB = async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/campaigns`)
+      if (response.data.success) {
+        // Merge with local state campaigns (for messages that aren't in DB yet)
+        const dbCampaigns = response.data.campaigns || []
+        const localCampaigns = campaigns.filter(c => 
+          !dbCampaigns.find(dbC => dbC.id === c.id)
+        )
+        setCampaigns([...dbCampaigns, ...localCampaigns])
+      }
+    } catch (error) {
+      console.error('Error fetching campaigns from database:', error)
+    }
+  }
 
   useEffect(() => {
     if (walletId) {
@@ -236,16 +259,29 @@ function App() {
     }
   }
 
-  const createNewCampaign = () => {
+  const createNewCampaign = async () => {
     const newCampaign = {
       id: Date.now().toString(),
       name: 'New Campaign',
       messages: [],
       paid: false
     }
+    
+    // Add to local state immediately
     setCampaigns([newCampaign, ...campaigns])
     setActiveCampaignId(newCampaign.id)
     setMessages([])
+    
+    // Save to database
+    try {
+      await axios.post(`${API_BASE}/campaign/create`, {
+        campaignId: newCampaign.id,
+        name: newCampaign.name,
+        messages: []
+      })
+    } catch (error) {
+      console.error('Error creating campaign in database:', error)
+    }
   }
 
   const processPayment = async () => {
@@ -262,13 +298,23 @@ function App() {
 
       markAsPaid()
 
+      // Update campaign in database after payment
       try {
+        await axios.put(`${API_BASE}/campaign/update`, {
+          campaignId: activeCampaignId,
+          paid: true,
+          cost: cost,
+          status: 'active'
+        })
+        
+        // Also ensure campaign exists in DB
         await axios.post(`${API_BASE}/campaign/create`, {
           campaignId: activeCampaignId,
+          name: activeCampaign?.name || 'New Campaign',
           messages: messages
-        }).catch(() => ({ data: { success: true } }))
+        })
       } catch (err) {
-        console.log('Campaign creation skipped')
+        console.error('Error updating campaign after payment:', err)
       }
     } catch (error) {
       console.error('Payment error:', error)
@@ -278,16 +324,38 @@ function App() {
     }
   }
 
-  const saveCampaignName = (campaignId) => {
+  const saveCampaignName = async (campaignId) => {
     if (editingName.trim()) {
-      setCampaigns(campaigns.map(c => c.id === campaignId ? { ...c, name: editingName.trim() } : c))
+      const newName = editingName.trim()
+      // Update local state
+      setCampaigns(campaigns.map(c => c.id === campaignId ? { ...c, name: newName } : c))
+      
+      // Update in database
+      try {
+        await axios.put(`${API_BASE}/campaign/update`, {
+          campaignId: campaignId,
+          name: newName
+        })
+      } catch (error) {
+        console.error('Error updating campaign name in database:', error)
+      }
     }
     setEditingCampaignId(null)
     setEditingName('')
   }
 
-  const deleteCampaign = (campaignId) => {
+  const deleteCampaign = async (campaignId) => {
     if (window.confirm('Are you sure you want to delete this campaign?')) {
+      // Delete from database
+      try {
+        await axios.delete(`${API_BASE}/campaign/delete`, {
+          params: { campaignId }
+        })
+      } catch (error) {
+        console.error('Error deleting campaign from database:', error)
+      }
+      
+      // Update local state
       const updatedCampaigns = campaigns.filter(c => c.id !== campaignId)
       setCampaigns(updatedCampaigns)
       if (activeCampaignId === campaignId) {
@@ -306,6 +374,7 @@ function App() {
   const handleCampaignClick = (campaignId) => {
     setActiveCampaignId(campaignId)
     setShowWallet(false)
+    setShowAnalytics(false)
   }
 
   const handleWalletToggle = () => {
@@ -313,6 +382,16 @@ function App() {
     setShowWallet(newWalletState)
     if (newWalletState) {
       setActiveCampaignId(null)
+      setShowAnalytics(false)
+    }
+  }
+
+  const handleAnalyticsToggle = () => {
+    const newAnalyticsState = !showAnalytics
+    setShowAnalytics(newAnalyticsState)
+    if (newAnalyticsState) {
+      setActiveCampaignId(null)
+      setShowWallet(false)
     }
   }
 
@@ -322,6 +401,7 @@ function App() {
         campaigns={campaigns}
         activeCampaignId={activeCampaignId}
         showWallet={showWallet}
+        showAnalytics={showAnalytics}
         editingCampaignId={editingCampaignId}
         editingName={editingName}
         onCreateCampaign={createNewCampaign}
@@ -338,10 +418,13 @@ function App() {
         onDelete={deleteCampaign}
         onNameChange={setEditingName}
         onWalletToggle={handleWalletToggle}
+        onAnalyticsToggle={handleAnalyticsToggle}
       />
 
       <div className="flex-1 flex flex-col">
-        {showWallet ? (
+        {showAnalytics ? (
+          <CampaignAnalyticsView />
+        ) : showWallet ? (
           <WalletView
             walletId={walletId}
             walletBalance={walletBalance}
@@ -365,36 +448,34 @@ function App() {
             onRefresh={fetchWalletData}
           />
         ) : activeCampaignId ? (
-          activeCampaign?.paid ? (
-            <CampaignAnalytics campaign={activeCampaign} analytics={analytics} />
-          ) : (
-            <>
-              <div className="p-4 bg-white shadow-sm">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-semibold text-gray-900">
-                    {activeCampaign?.name}
+          <>
+            <div className="p-4 bg-white shadow-sm">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-900">
+                  {activeCampaign?.name}
+                  {!activeCampaign?.paid && (
                     <span className="ml-2 text-sm font-normal text-amber-600">(Payment Required)</span>
-                  </h2>
-                  {(campaignCost || activeCampaign?.cost) && (
-                    <div className="text-sm text-gray-600">
-                      Cost: <span className="font-semibold text-amber-600">${campaignCost || activeCampaign?.cost}</span>
-                    </div>
                   )}
-                </div>
+                </h2>
+                {(campaignCost || activeCampaign?.cost) && !activeCampaign?.paid && (
+                  <div className="text-sm text-gray-600">
+                    Cost: <span className="font-semibold text-amber-600">${campaignCost || activeCampaign?.cost}</span>
+                  </div>
+                )}
               </div>
+            </div>
 
-              <CampaignChat
-                messages={messages}
-                inputMessage={inputMessage}
-                isLoading={isLoading}
-                onInputChange={setInputMessage}
-                onSendMessage={handleSendMessage}
-                textareaRef={textareaRef}
-                showPaymentButton={!activeCampaign?.paid}
-                onPaymentClick={processPayment}
-              />
-            </>
-          )
+            <CampaignChat
+              messages={messages}
+              inputMessage={inputMessage}
+              isLoading={isLoading}
+              onInputChange={setInputMessage}
+              onSendMessage={handleSendMessage}
+              textareaRef={textareaRef}
+              showPaymentButton={!activeCampaign?.paid}
+              onPaymentClick={processPayment}
+            />
+          </>
         ) : (
           <div className="flex-1 flex items-center justify-center bg-gray-50">
             <div className="text-center text-gray-600">

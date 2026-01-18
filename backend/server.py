@@ -26,6 +26,14 @@ from wallet_utils import (
     get_wallet_info,
     request_faucet
 )
+from db import (
+    get_all_campaigns, 
+    get_campaign_analytics,
+    create_campaign,
+    update_campaign,
+    delete_campaign,
+    create_or_update_analytics
+)
 
 app = FastAPI(title="Arc Wardens API", version="1.0.0")
 
@@ -81,6 +89,15 @@ class CampaignPayRequest(BaseModel):
 class CampaignCreateRequest(BaseModel):
     campaignId: str
     messages: list
+    name: Optional[str] = None
+
+class CampaignUpdateRequest(BaseModel):
+    campaignId: str
+    name: Optional[str] = None
+    paid: Optional[bool] = None
+    cost: Optional[float] = None
+    status: Optional[str] = None
+
 
 @app.get("/api/wallet/balance")
 async def get_balance(request: Request, walletId: str = Query(..., description="Wallet ID")):
@@ -209,9 +226,27 @@ async def campaign_chat(request: CampaignChatRequest):
 
 @app.post("/api/campaign/pay")
 async def campaign_pay(request: CampaignPayRequest):
-    """Process campaign payment"""
+    """Process campaign payment and update database"""
     try:
-        # Stub response - replace with actual payment processing
+        # Update campaign as paid in database
+        update_campaign(
+            request.campaignId,
+            paid=True,
+            cost=request.amount,
+            status='active'
+        )
+        
+        # Generate sample analytics for the paid campaign
+        from db import generate_sample_analytics
+        sample_analytics = generate_sample_analytics(request.campaignId)
+        create_or_update_analytics(
+            request.campaignId,
+            emails_sent=sample_analytics['emailsSent'],
+            emails_opened=sample_analytics['emailsOpened'],
+            replies=sample_analytics['replies'],
+            bounce_rate=sample_analytics['bounceRate']
+        )
+        
         return {
             'success': True,
             'message': f'Payment processed for campaign {request.campaignId}',
@@ -219,20 +254,95 @@ async def campaign_pay(request: CampaignPayRequest):
             'transactionId': f'tx_{request.campaignId}_{int(time.time())}'
         }
     except Exception as e:
+        logger.exception(f"Error processing payment: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/campaign/create")
 async def campaign_create(request: CampaignCreateRequest):
-    """Create a campaign"""
+    """Create or update a campaign in the database"""
     try:
-        # Stub response - replace with actual campaign creation logic
+        # Use provided name or extract from messages or use default
+        campaign_name = request.name or 'New Campaign'
+        if not request.name and request.messages and len(request.messages) > 0:
+            # Try to extract name from first user message
+            first_user_msg = next((m for m in request.messages if m.get('role') == 'user'), None)
+            if first_user_msg and first_user_msg.get('content'):
+                # Use first 50 chars as name
+                campaign_name = first_user_msg['content'][:50]
+        
+        # Create campaign in database
+        create_campaign(request.campaignId, campaign_name)
+        
         return {
             'success': True,
             'message': f'Campaign {request.campaignId} created successfully',
             'campaignId': request.campaignId,
-            'messagesCount': len(request.messages)
+            'name': campaign_name
         }
     except Exception as e:
+        logger.exception(f"Error creating campaign: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/campaign/update")
+async def campaign_update(request: CampaignUpdateRequest):
+    """Update a campaign in the database"""
+    try:
+        update_campaign(
+            request.campaignId,
+            name=request.name,
+            paid=request.paid,
+            cost=request.cost,
+            status=request.status
+        )
+        return {
+            'success': True,
+            'message': f'Campaign {request.campaignId} updated successfully'
+        }
+    except Exception as e:
+        logger.exception(f"Error updating campaign: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/campaign/delete")
+async def campaign_delete(campaignId: str = Query(..., description="Campaign ID to delete")):
+    """Delete a campaign from the database"""
+    try:
+        delete_campaign(campaignId)
+        return {
+            'success': True,
+            'message': f'Campaign {campaignId} deleted successfully'
+        }
+    except Exception as e:
+        logger.exception(f"Error deleting campaign: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/campaigns/{campaign_id}/analytics")
+async def get_campaign_analytics_endpoint(campaign_id: str):
+    """Get analytics for a specific campaign"""
+    try:
+        campaign = get_campaign_analytics(campaign_id)
+        if not campaign:
+            raise HTTPException(status_code=404, detail=f"Campaign {campaign_id} not found")
+        return {
+            'success': True,
+            'campaign': campaign
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting campaign analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/campaigns")
+async def get_campaigns():
+    """Get all campaigns from database"""
+    try:
+        campaigns = get_all_campaigns()
+        return {
+            'success': True,
+            'campaigns': campaigns
+        }
+    except Exception as e:
+        logger.exception(f"Error getting campaigns: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
