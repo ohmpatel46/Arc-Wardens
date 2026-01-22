@@ -10,13 +10,9 @@ backend/
 │   ├── __init__.py
 │   └── campaign_agent.py    # Central campaign agent
 ├── tools/               # Agent tools (MCP-style)
-│   ├── __init__.py
-│   ├── intent_routing.py
-│   ├── apollo_tool.py
-│   ├── sheets_tool.py
-│   ├── gmail_tool.py
-│   ├── clarification.py
-│   └── repeat_campaign.py
+│   ├── __init__.py          # Tool exports
+│   ├── schema.py            # MCP-style JSON Schema definitions
+│   └── registry.py          # Tool executors and LangChain integration
 ├── core/                # Core utilities
 │   ├── __init__.py
 │   ├── db.py            # Database operations
@@ -49,7 +45,7 @@ pip install -r requirements.txt
    - `CIRCLE_API_KEY`
    - `CIRCLE_ENTITY_SECRET_BASE64`
    - `CIRCLE_PUBLIC_KEY_PEM`
-   - `OPENAI_API_KEY` (for the LangChain agent)
+   - `GOOGLE_API_KEY` (for the LangChain agent using Gemini)
    - `CIRCLE_WALLET_ID` (optional, can be set in frontend)
 
 3. Run the server:
@@ -88,13 +84,30 @@ The server will run on `http://localhost:5000`
 ### Health
 - `GET /health` - Health check
 
-## Agent Tools
+## Agent Architecture (MCP-Style)
 
-The campaign agent has access to the following tools (currently placeholders):
+The campaign agent uses Model Context Protocol (MCP) style tool definitions:
 
-1. **intent_routing** - Routes user intent to appropriate tool
-2. **apollo_tool** - Apollo API for lead generation
-3. **sheets_tool** - Google Sheets for campaign data
-4. **gmail_tool** - Gmail for email campaigns
-5. **ask_for_clarification** - Asks user for clarification
-6. **repeat_campaign_action** - Repeats previous campaign actions
+### Key Files
+- `tools/schema.py` - JSON Schema tool definitions (source of truth)
+- `tools/registry.py` - Tool executors and LangChain integration
+- `agents/prompt_builder.py` - Dynamic system prompt generation
+
+### Available Tools (14 total)
+
+| Category | Tools |
+|----------|-------|
+| Lead Generation | `apollo_search_people`, `apollo_search_companies`, `apollo_enrich_person` |
+| List Management | `apollo_create_list`, `apollo_add_to_list` |
+| Data Management | `sheets_read_range`, `sheets_write_range`, `sheets_append_rows`, `sheets_update_cell` |
+| Email Operations | `gmail_send_email`, `gmail_send_bulk_emails`, `gmail_create_draft` |
+| Utility | `ask_for_clarification`, `repeat_campaign_action` |
+
+### Intent Routing
+Intent routing is handled in the system prompt (no separate routing tool). The prompt is dynamically generated from tool schemas, including:
+- Tool documentation with parameters
+- Intent-to-tool mapping guidelines
+- Execution best practices
+- High-impact action confirmations
+
+**Note**: All tools currently have placeholder implementations. See `MCP_IMPLEMENTATION.md` for details on the architecture.

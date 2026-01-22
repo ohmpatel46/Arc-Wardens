@@ -1,79 +1,84 @@
 """
-LangChain-based campaign agent.
-This is the central agent that handles campaign conversations and tool execution.
+MCP-Style Campaign Agent.
+Central agent that handles campaign conversations and tool execution
+using Model Context Protocol style tool schemas and dynamic prompt generation.
 """
 
-from langchain.agents import AgentExecutor, create_openai_functions_agent
+from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, AIMessage
 from typing import List, Dict, Any, Optional
 import os
 import logging
 
-from tools import ALL_TOOLS
+from .prompt_builder import get_campaign_agent_prompt
+from tools.registry import ALL_TOOLS
 
 logger = logging.getLogger(__name__)
 
-# Agent Prompt Template
-AGENT_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """You are an AI assistant for Arc Wardens, an AI-powered sales outreach automation platform.
-
-Your role is to help users create and manage sales campaigns by:
-1. Understanding their intent and routing to appropriate tools
-2. Using Apollo API to find and enrich leads
-3. Managing campaign data in Google Sheets
-4. Sending emails via Gmail
-5. Asking for clarification when needed
-6. Repeating campaign actions when requested
-
-When a user asks you to do something:
-- First, use intent_routing to understand what they want
-- Then use the appropriate tool (apollo_tool, sheets_tool, gmail_tool)
-- If unclear, ask_for_clarification
-- If they want to repeat something, use repeat_campaign_action
-
-Always be helpful, clear, and proactive in suggesting next steps.
-When tools are executed, costs will be deducted from the user's wallet automatically."""),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{input}"),
-    MessagesPlaceholder(variable_name="agent_scratchpad")
-])
-
 
 class CampaignAgent:
-    """LangChain-based chat agent for campaign management."""
+    """
+    MCP-Style LangChain agent for campaign management.
     
-    def __init__(self, model_name: str = "gpt-4", temperature: float = 0.7):
+    Uses:
+    - Centralized JSON Schema tool definitions (tools/schema.py)
+    - Dynamic system prompt generation (agents/prompt_builder.py)
+    - Tool registry mapping schemas to executors (tools/registry.py)
+    """
+    
+    def __init__(self, model_name: str = "gemini-1.5-pro", temperature: float = 0.7):
         """
         Initialize the campaign agent.
         
         Args:
-            model_name: OpenAI model to use
+            model_name: Google Gemini model to use
             temperature: Temperature for model responses
         """
-        self.llm = ChatOpenAI(
+        # Initialize the LLM
+        self.llm = ChatGoogleGenerativeAI(
             model=model_name,
             temperature=temperature,
-            openai_api_key=os.getenv("OPENAI_API_KEY")
+            google_api_key=os.getenv("GOOGLE_API_KEY")
         )
         
-        self.agent = create_openai_functions_agent(
+        # Build the system prompt dynamically from MCP schemas
+        system_prompt = get_campaign_agent_prompt()
+        logger.debug(f"Generated system prompt ({len(system_prompt)} chars)")
+        
+        # Create the prompt template
+        self.prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad")
+        ])
+        
+        # Create the agent with tool calling capability
+        self.agent = create_tool_calling_agent(
             llm=self.llm,
             tools=ALL_TOOLS,
-            prompt=AGENT_PROMPT
+            prompt=self.prompt
         )
         
+        # Create the executor
         self.agent_executor = AgentExecutor(
             agent=self.agent,
             tools=ALL_TOOLS,
             verbose=True,
-            handle_parsing_errors=True
+            handle_parsing_errors=True,
+            max_iterations=10,  # Prevent infinite loops
+            return_intermediate_steps=False
         )
         
-        logger.info("Campaign agent initialized")
+        logger.info(f"Campaign agent initialized with {len(ALL_TOOLS)} tools")
     
-    def chat(self, message: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
+    def chat(
+        self,
+        message: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, Any]:
         """
         Process a chat message and return agent response.
         
@@ -89,10 +94,15 @@ class CampaignAgent:
             chat_history = []
             if conversation_history:
                 for msg in conversation_history:
-                    if msg.get("role") == "user":
-                        chat_history.append(HumanMessage(content=msg.get("content", "")))
-                    elif msg.get("role") == "assistant":
-                        chat_history.append(AIMessage(content=msg.get("content", "")))
+                    role = msg.get("role", "")
+                    content = msg.get("content", "")
+                    
+                    if role == "user":
+                        chat_history.append(HumanMessage(content=content))
+                    elif role == "assistant":
+                        chat_history.append(AIMessage(content=content))
+            
+            logger.info(f"Processing message with {len(chat_history)} history items")
             
             # Execute agent
             result = self.agent_executor.invoke({
@@ -116,9 +126,18 @@ class CampaignAgent:
                 "message": f"Sorry, I encountered an error: {str(e)}",
                 "error": str(e)
             }
+    
+    def get_available_tools(self) -> List[str]:
+        """Get list of available tool names."""
+        return [tool.name for tool in ALL_TOOLS]
+    
+    def get_tool_info(self, tool_name: str) -> Optional[Dict[str, Any]]:
+        """Get information about a specific tool."""
+        from tools.schema import get_tool_by_name
+        return get_tool_by_name(tool_name)
 
 
-# Singleton instance (will be initialized when needed)
+# Singleton instance
 _agent_instance: Optional[CampaignAgent] = None
 
 
@@ -128,3 +147,10 @@ def get_agent() -> CampaignAgent:
     if _agent_instance is None:
         _agent_instance = CampaignAgent()
     return _agent_instance
+
+
+def reset_agent() -> None:
+    """Reset the agent instance (useful for testing or config changes)."""
+    global _agent_instance
+    _agent_instance = None
+    logger.info("Agent instance reset")

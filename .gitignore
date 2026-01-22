@@ -71,3 +71,7 @@ htmlcov/
 *.tmp
 *.temp
 .cache/
+
+# Database
+campaigns.db
+*.db

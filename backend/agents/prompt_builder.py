@@ -1,0 +1,248 @@
+"""
+MCP-Style System Prompt Builder.
+Dynamically generates system prompts from tool schemas following Model Context Protocol best practices.
+"""
+
+from typing import List, Dict, Any
+import json
+
+
+def format_json_schema_params(input_schema: Dict[str, Any]) -> str:
+    """Format JSON Schema properties into readable parameter documentation."""
+    properties = input_schema.get("properties", {})
+    required = input_schema.get("required", [])
+    
+    if not properties:
+        return "  No parameters required."
+    
+    lines = []
+    for name, schema in properties.items():
+        # Determine if required
+        req_marker = " **(required)**" if name in required else ""
+        
+        # Get type info
+        param_type = schema.get("type", "any")
+        if param_type == "array":
+            items_type = schema.get("items", {}).get("type", "any")
+            param_type = f"array[{items_type}]"
+        
+        # Get description
+        desc = schema.get("description", "No description")
+        
+        # Get constraints
+        constraints = []
+        if "enum" in schema:
+            constraints.append(f"options: {schema['enum']}")
+        if "minimum" in schema:
+            constraints.append(f"min: {schema['minimum']}")
+        if "maximum" in schema:
+            constraints.append(f"max: {schema['maximum']}")
+        if "default" in schema:
+            constraints.append(f"default: {schema['default']}")
+        
+        constraint_str = f" ({', '.join(constraints)})" if constraints else ""
+        
+        lines.append(f"  - `{name}` ({param_type}){req_marker}: {desc}{constraint_str}")
+    
+    return "\n".join(lines)
+
+
+def build_tool_documentation(tool_schemas: List[Dict[str, Any]], categories: Dict[str, Any]) -> str:
+    """
+    Generate comprehensive tool documentation from MCP-style schemas.
+    Groups tools by category and includes all relevant information.
+    """
+    docs = []
+    
+    # Group tools by category
+    tools_by_category = {}
+    for tool in tool_schemas:
+        cat = tool.get("category", "other")
+        if cat not in tools_by_category:
+            tools_by_category[cat] = []
+        tools_by_category[cat].append(tool)
+    
+    # Generate documentation for each category
+    for cat_key, cat_info in categories.items():
+        if cat_key not in tools_by_category:
+            continue
+            
+        docs.append(f"### {cat_info['display_name']}")
+        docs.append(f"_{cat_info['description']}_\n")
+        
+        for tool in tools_by_category[cat_key]:
+            params_doc = format_json_schema_params(tool["inputSchema"])
+            side_effects = tool.get("sideEffects", "None documented")
+            
+            docs.append(f"""**`{tool['name']}`**
+{tool['description']}
+
+Parameters:
+{params_doc}
+
+Side Effects: {side_effects}
+""")
+    
+    return "\n".join(docs)
+
+
+def build_intent_routing_guide(tool_schemas: List[Dict[str, Any]], categories: Dict[str, Any]) -> str:
+    """
+    Generate intent routing guidelines based on tool schemas.
+    Maps user intent patterns to appropriate tools.
+    """
+    routing = []
+    
+    # Define intent patterns for each category
+    intent_patterns = {
+        "lead_generation": {
+            "keywords": ["find", "search", "get", "discover", "look for", "locate", "who are", "list of"],
+            "examples": [
+                '"Find me software engineers" → `apollo_search_people`',
+                '"Search for SaaS companies" → `apollo_search_companies`',
+                '"Get more info about John Smith" → `apollo_enrich_person`'
+            ]
+        },
+        "list_management": {
+            "keywords": ["create list", "make a list", "add to list", "organize", "group", "save to list"],
+            "examples": [
+                '"Create a list for this campaign" → `apollo_create_list`',
+                '"Add these contacts to my list" → `apollo_add_to_list`'
+            ]
+        },
+        "data_management": {
+            "keywords": ["read", "write", "update", "save", "export", "import", "spreadsheet", "sheet", "cell"],
+            "examples": [
+                '"Read my contacts from the sheet" → `sheets_read_range`',
+                '"Save these results to the spreadsheet" → `sheets_write_range` or `sheets_append_rows`',
+                '"Update the status cell" → `sheets_update_cell`'
+            ]
+        },
+        "email_operations": {
+            "keywords": ["email", "send", "message", "reach out", "contact", "draft", "outreach", "campaign email"],
+            "examples": [
+                '"Send an email to John" → `gmail_send_email`',
+                '"Send campaign emails to all leads" → `gmail_send_bulk_emails`',
+                '"Create a draft for review" → `gmail_create_draft`'
+            ]
+        }
+    }
+    
+    routing.append("## Intent Routing Guide\n")
+    routing.append("Analyze the user's message and select the appropriate tool based on their intent:\n")
+    
+    for cat_key, cat_info in categories.items():
+        if cat_key not in intent_patterns:
+            continue
+            
+        patterns = intent_patterns[cat_key]
+        routing.append(f"### {cat_info['display_name']}")
+        routing.append(f"**Trigger Keywords**: {', '.join(patterns['keywords'])}\n")
+        routing.append("**Tool Selection**:")
+        for example in patterns["examples"]:
+            routing.append(f"- {example}")
+        routing.append("")
+    
+    # Add clarification guidance
+    routing.append("""### When to Ask for Clarification
+Use `ask_for_clarification` when:
+- The user's request is ambiguous (e.g., "send the email" - which email? to whom?)
+- Required parameters are missing (e.g., no spreadsheet ID provided)
+- The action has significant side effects and user hasn't confirmed
+- Multiple interpretations are possible
+
+**Never assume** - if critical information is missing, ask first.""")
+    
+    return "\n".join(routing)
+
+
+def build_execution_guidelines(high_impact_tools: List[str]) -> str:
+    """Generate execution guidelines and best practices."""
+    
+    return f"""## Execution Guidelines
+
+### 1. Pre-Execution Checks
+Before calling any tool:
+- Verify all **required** parameters are available
+- If parameters are missing, use `ask_for_clarification`
+- For high-impact tools, confirm with the user first
+
+### 2. High-Impact Tools (Require User Confirmation)
+The following tools have significant side effects. **Always confirm with the user before executing**:
+{chr(10).join(f'- `{tool}`' for tool in high_impact_tools)}
+
+### 3. Tool Chaining Patterns
+Common workflows that chain multiple tools:
+
+**Lead Generation → List → Email Campaign:**
+1. `apollo_search_people` - Find leads matching criteria
+2. `apollo_create_list` - Create a list for the campaign
+3. `apollo_add_to_list` - Add found leads to the list
+4. `sheets_append_rows` - Export leads to spreadsheet (optional)
+5. `gmail_send_bulk_emails` - Send campaign emails
+
+**Data Sync Workflow:**
+1. `sheets_read_range` - Read existing data
+2. `apollo_search_people` - Find new leads
+3. `sheets_append_rows` - Add new leads to sheet
+
+### 4. Error Handling
+- If a tool returns an error, explain it clearly to the user
+- Suggest alternatives or corrective actions
+- Never retry failed operations without user consent
+
+### 5. Response Format
+After executing a tool:
+1. Summarize what was done
+2. Present key results (counts, names, etc.)
+3. Suggest logical next steps
+4. If action had costs, mention it"""
+
+
+def build_system_prompt(
+    tool_schemas: List[Dict[str, Any]],
+    categories: Dict[str, Any],
+    high_impact_tools: List[str]
+) -> str:
+    """
+    Build the complete system prompt from tool schemas.
+    This is the main entry point for generating MCP-style prompts.
+    """
+    
+    tool_docs = build_tool_documentation(tool_schemas, categories)
+    intent_guide = build_intent_routing_guide(tool_schemas, categories)
+    execution_guide = build_execution_guidelines(high_impact_tools)
+    
+    return f"""You are an AI assistant for Arc Wardens, an AI-powered sales outreach automation platform.
+
+Your role is to help users create and manage sales campaigns by intelligently selecting and using the appropriate tools based on their intent.
+
+# Available Tools
+
+{tool_docs}
+
+{intent_guide}
+
+{execution_guide}
+
+## Important Reminders
+
+1. **Be Proactive**: After completing an action, suggest logical next steps
+2. **Be Transparent**: Explain what tools you're using and why
+3. **Be Cost-Aware**: Inform users when actions may incur costs (API calls, credits)
+4. **Be Safe**: Never execute high-impact actions without confirmation
+5. **Be Helpful**: If tools return placeholder/mock data, explain what the actual behavior would be
+
+Remember: You have access to powerful tools that can search databases, manage lists, read/write spreadsheets, and send emails. Use them responsibly and always prioritize the user's intent."""
+
+
+# Convenience function for the agent
+def get_campaign_agent_prompt() -> str:
+    """Get the fully built system prompt for the campaign agent."""
+    from tools.schema import ALL_TOOL_SCHEMAS, TOOL_CATEGORIES, get_high_impact_tools
+    
+    return build_system_prompt(
+        tool_schemas=ALL_TOOL_SCHEMAS,
+        categories=TOOL_CATEGORIES,
+        high_impact_tools=get_high_impact_tools()
+    )

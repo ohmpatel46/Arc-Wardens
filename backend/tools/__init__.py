@@ -1,36 +1,42 @@
 """
-Tools module for the campaign agent.
-All tools are defined here and exported for use by the agent.
+Tools Module for the Campaign Agent.
+MCP-style tool definitions with centralized schemas and dynamic registration.
+
+Architecture:
+- schema.py: MCP-style JSON Schema tool definitions (source of truth)
+- registry.py: Maps schemas to execution functions, creates LangChain tools
+- Individual tool files (apollo_tool.py, etc.): Kept for reference but not used
+
+Usage:
+    from tools import ALL_TOOLS  # LangChain tools for the agent
+    from tools.schema import ALL_TOOL_SCHEMAS  # Raw MCP schemas
+    from tools.registry import TOOL_EXECUTORS  # Direct access to executors
 """
 
-from .intent_routing import IntentRoutingTool, IntentRoutingInput
-from .apollo_tool import ApolloTool, ApolloToolInput
-from .sheets_tool import SheetsTool, SheetsToolInput
-from .gmail_tool import GmailTool, GmailToolInput
-from .clarification import AskClarificationTool, AskClarificationInput
-from .repeat_campaign import RepeatCampaignTool, RepeatCampaignInput
+# Import the dynamically generated LangChain tools
+from .registry import ALL_TOOLS, TOOL_EXECUTORS, create_langchain_tool
+
+# Import schema utilities
+from .schema import (
+    ALL_TOOL_SCHEMAS,
+    TOOL_CATEGORIES,
+    get_tool_by_name,
+    get_tools_by_category,
+    get_high_impact_tools,
+)
 
 __all__ = [
-    "IntentRoutingTool",
-    "IntentRoutingInput",
-    "ApolloTool",
-    "ApolloToolInput",
-    "SheetsTool",
-    "SheetsToolInput",
-    "GmailTool",
-    "GmailToolInput",
-    "AskClarificationTool",
-    "AskClarificationInput",
-    "RepeatCampaignTool",
-    "RepeatCampaignInput",
-]
-
-# List of all tools for easy import
-ALL_TOOLS = [
-    IntentRoutingTool,
-    ApolloTool,
-    SheetsTool,
-    GmailTool,
-    AskClarificationTool,
-    RepeatCampaignTool,
+    # LangChain tools (for agent)
+    "ALL_TOOLS",
+    
+    # Schema access
+    "ALL_TOOL_SCHEMAS",
+    "TOOL_CATEGORIES",
+    "get_tool_by_name",
+    "get_tools_by_category",
+    "get_high_impact_tools",
+    
+    # Registry access
+    "TOOL_EXECUTORS",
+    "create_langchain_tool",
 ]
