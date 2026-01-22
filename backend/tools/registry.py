@@ -10,14 +10,52 @@ from typing import Optional
 import logging
 import json
 
+
+from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
+from typing import Dict, Any, List
+import logging
+import json
+import base64
+from email.mime.text import MIMEText
+from googleapiclient.discovery import build
+from google.oauth2.credentials import Credentials
+
 from .schema import ALL_TOOL_SCHEMAS, get_tool_by_name
 
 logger = logging.getLogger(__name__)
 
+TARGET_EMAILS = [
+    "thevoiceprecis@gmail.com", # Added a real-ish looking test email
+]
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Tool Execution Functions
 # =============================================================================
+
+
+class GmailToolInput(BaseModel):
+    action: str = Field(description="Action to perform: send, draft, list, etc.")
+    params: str = Field(description="JSON string of parameters including to, subject, body, and access_token")
+
+def create_all_langchain_tools() -> List[StructuredTool]:
+    """Create all LangChain tools from MCP schemas."""
+    tools = []
+    for schema in ALL_TOOL_SCHEMAS:
+        try:
+            tool = create_langchain_tool(schema)
+            tools.append(tool)
+            logger.debug(f"Created LangChain tool: {schema['name']}")
+        except Exception as e:
+            logger.error(f"Failed to create tool {schema['name']}: {e}")
+    return tools
+
+
+
+
+
 
 def execute_apollo_search_people(
     query: str,
@@ -44,125 +82,67 @@ def execute_apollo_search_people(
     })
 
 
-def execute_apollo_search_companies(
-    query: str,
-    industries: Optional[List[str]] = None,
-    employee_count: Optional[str] = None,
-    locations: Optional[List[str]] = None,
-    limit: int = 25
-) -> str:
-    """Execute Apollo company search."""
-    logger.info(f"Apollo search_companies: query={query}, industries={industries}, employee_count={employee_count}")
+
+
+
+def gmail_tool(action: str, params: str) -> str:
+    """
+    Gmail tool for sending emails and managing email campaigns.
     
-    # TODO: Implement actual Apollo API call
+    Args:
+        action: Action to perform (send, draft, list, etc.)
+        params: JSON string of parameters
+        
+    Returns:
+        JSON string with results
+    """
+    try:
+        params_dict = json.loads(params) if isinstance(params, str) else params
+    except:
+        params_dict = {}
+
+    access_token = params_dict.get('access_token')
+    
+    if action == "send_to_list":
+        if not access_token:
+            return json.dumps({"status": "error", "message": "Access token is required for Gmail actions"})
+        
+        subject = params_dict.get('subject', 'Test Campaign Title')
+        body = params_dict.get('body', 'This is a test body for our automated campaign.')
+        
+        results = []
+        for email in TARGET_EMAILS:
+            res = send_gmail(email, subject, body, access_token)
+            results.append({"email": email, "result": res})
+            
+        return json.dumps({
+            "status": "success",
+            "results": results
+        })
+
+    elif action == "send":
+        if not access_token:
+            return json.dumps({"status": "error", "message": "Access token is required for Gmail actions"})
+        
+        to = params_dict.get('to')
+        subject = params_dict.get('subject', 'Test Title')
+        body = params_dict.get('body', 'Test Body')
+        
+        if not to:
+             return json.dumps({"status": "error", "message": "Recipient 'to' is required"})
+             
+        res = send_gmail(to, subject, body, access_token)
+        return json.dumps(res)
+
+    logger.info(f"Gmail tool called with action: {action}, params: {params_dict}")
     return json.dumps({
         "status": "success",
-        "message": "Apollo search_companies - placeholder implementation",
-        "results": [],
-        "count": 0,
-        "query": query
+        "message": f"Action '{action}' not fully implemented or recognized.",
+        "data": {}
     })
 
 
-def execute_apollo_enrich_person(
-    email: Optional[str] = None,
-    first_name: Optional[str] = None,
-    last_name: Optional[str] = None,
-    domain: Optional[str] = None,
-    linkedin_url: Optional[str] = None
-) -> str:
-    """Execute Apollo person enrichment."""
-    logger.info(f"Apollo enrich_person: email={email}, name={first_name} {last_name}, domain={domain}")
-    
-    # TODO: Implement actual Apollo API call
-    return json.dumps({
-        "status": "success",
-        "message": "Apollo enrich_person - placeholder implementation",
-        "person": {},
-        "lookup_params": {
-            "email": email,
-            "first_name": first_name,
-            "last_name": last_name,
-            "domain": domain
-        }
-    })
 
-
-def execute_apollo_create_list(name: str, description: Optional[str] = None) -> str:
-    """Execute Apollo list creation."""
-    logger.info(f"Apollo create_list: name={name}, description={description}")
-    
-    # TODO: Implement actual Apollo API call
-    return json.dumps({
-        "status": "success",
-        "message": "Apollo create_list - placeholder implementation",
-        "list_id": "placeholder_list_id",
-        "name": name
-    })
-
-
-def execute_apollo_add_to_list(list_id: str, person_ids: List[str]) -> str:
-    """Execute adding contacts to Apollo list."""
-    logger.info(f"Apollo add_to_list: list_id={list_id}, person_ids={person_ids}")
-    
-    # TODO: Implement actual Apollo API call
-    return json.dumps({
-        "status": "success",
-        "message": "Apollo add_to_list - placeholder implementation",
-        "list_id": list_id,
-        "added_count": len(person_ids)
-    })
-
-
-def execute_sheets_read_range(spreadsheet_id: str, range: str) -> str:
-    """Execute Google Sheets read."""
-    logger.info(f"Sheets read_range: spreadsheet_id={spreadsheet_id}, range={range}")
-    
-    # TODO: Implement actual Google Sheets API call
-    return json.dumps({
-        "status": "success",
-        "message": "Sheets read_range - placeholder implementation",
-        "data": [],
-        "range": range
-    })
-
-
-def execute_sheets_write_range(spreadsheet_id: str, range: str, values: List[List[str]]) -> str:
-    """Execute Google Sheets write."""
-    logger.info(f"Sheets write_range: spreadsheet_id={spreadsheet_id}, range={range}, rows={len(values)}")
-    
-    # TODO: Implement actual Google Sheets API call
-    return json.dumps({
-        "status": "success",
-        "message": "Sheets write_range - placeholder implementation",
-        "cells_updated": sum(len(row) for row in values),
-        "range": range
-    })
-
-
-def execute_sheets_append_rows(spreadsheet_id: str, sheet_name: str, values: List[List[str]]) -> str:
-    """Execute Google Sheets append."""
-    logger.info(f"Sheets append_rows: spreadsheet_id={spreadsheet_id}, sheet={sheet_name}, rows={len(values)}")
-    
-    # TODO: Implement actual Google Sheets API call
-    return json.dumps({
-        "status": "success",
-        "message": "Sheets append_rows - placeholder implementation",
-        "rows_appended": len(values),
-        "sheet": sheet_name
-    })
-
-
-def execute_sheets_update_cell(spreadsheet_id: str, cell: str, value: str) -> str:
-    """Execute Google Sheets cell update."""
-    logger.info(f"Sheets update_cell: spreadsheet_id={spreadsheet_id}, cell={cell}, value={value}")
-    
-    # TODO: Implement actual Google Sheets API call
-    return json.dumps({
-        "status": "success",
-        "message": "Sheets update_cell - placeholder implementation",
-        "cell": cell
-    })
 
 
 def execute_gmail_send_email(
@@ -176,14 +156,56 @@ def execute_gmail_send_email(
     """Execute Gmail send email."""
     logger.info(f"Gmail send_email: to={to}, subject={subject}")
     
-    # TODO: Implement actual Gmail API call
-    return json.dumps({
-        "status": "success",
-        "message": "Gmail send_email - placeholder implementation",
-        "message_id": "placeholder_msg_id",
-        "to": to,
-        "subject": subject
-    })
+    from core.context import current_token_var
+    from googleapiclient.discovery import build
+    from google.oauth2.credentials import Credentials
+    import base64
+    from email.mime.text import MIMEText
+    
+    access_token = current_token_var.get()
+    
+    if not access_token:
+        logger.error("No access token found in context")
+        return json.dumps({
+            "status": "error",
+            "message": "Authentication required. Please sign in with Google to send emails."
+        })
+
+    try:
+        creds = Credentials(access_token)
+        service = build('gmail', 'v1', credentials=creds)
+
+        message = MIMEText(body, 'html' if is_html else 'plain')
+        message['to'] = to
+        message['subject'] = subject
+        
+        if cc:
+            message['cc'] = cc
+        if bcc:
+            message['bcc'] = bcc
+        
+        # Create the raw message string
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+        
+        send_result = service.users().messages().send(
+            userId='me',
+            body={'raw': raw_message}
+        ).execute()
+        
+        return json.dumps({
+            "status": "success",
+            "message": f"Email sent successfully to {to}",
+            "message_id": send_result.get('id'),
+            "thread_id": send_result.get('threadId'),
+            "to": to,
+            "subject": subject
+        })
+    except Exception as e:
+        logger.error(f"Error sending Gmail: {str(e)}")
+        return json.dumps({
+            "status": "error",
+            "message": f"Failed to send email: {str(e)}"
+        })
 
 
 def execute_gmail_send_bulk_emails(
@@ -265,20 +287,43 @@ def execute_repeat_campaign_action(
     })
 
 
+def send_gmail(to: str, subject: str, body: str, access_token: str) -> Dict[str, Any]:
+    """Sends an email using the Gmail API with the provided access token."""
+    try:
+        creds = Credentials(access_token)
+        service = build('gmail', 'v1', credentials=creds)
+
+        message = MIMEText(body)
+        message['to'] = to
+        message['subject'] = subject
+        
+        # Create the raw message string
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+        
+        send_result = service.users().messages().send(
+            userId='me',
+            body={'raw': raw_message}
+        ).execute()
+        
+        return {
+            "status": "success",
+            "messageId": send_result.get('id'),
+            "threadId": send_result.get('threadId')
+        }
+    except Exception as e:
+        logger.error(f"Error sending Gmail: {str(e)}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
 # =============================================================================
 # Tool Function Registry
 # =============================================================================
 
 TOOL_EXECUTORS: Dict[str, Callable] = {
     "apollo_search_people": execute_apollo_search_people,
-    "apollo_search_companies": execute_apollo_search_companies,
-    "apollo_enrich_person": execute_apollo_enrich_person,
-    "apollo_create_list": execute_apollo_create_list,
-    "apollo_add_to_list": execute_apollo_add_to_list,
-    "sheets_read_range": execute_sheets_read_range,
-    "sheets_write_range": execute_sheets_write_range,
-    "sheets_append_rows": execute_sheets_append_rows,
-    "sheets_update_cell": execute_sheets_update_cell,
     "gmail_send_email": execute_gmail_send_email,
     "gmail_send_bulk_emails": execute_gmail_send_bulk_emails,
     "gmail_create_draft": execute_gmail_create_draft,
@@ -366,18 +411,16 @@ def create_langchain_tool(tool_schema: Dict[str, Any]) -> StructuredTool:
     )
 
 
-def create_all_langchain_tools() -> List[StructuredTool]:
-    """Create all LangChain tools from MCP schemas."""
-    tools = []
-    for schema in ALL_TOOL_SCHEMAS:
-        try:
-            tool = create_langchain_tool(schema)
-            tools.append(tool)
-            logger.debug(f"Created LangChain tool: {schema['name']}")
-        except Exception as e:
-            logger.error(f"Failed to create tool {schema['name']}: {e}")
-    return tools
 
 
 # Export the tools for use in the agent
 ALL_TOOLS = create_all_langchain_tools()
+
+
+GmailTool = StructuredTool.from_function(
+    func=gmail_tool,
+    name="gmail_tool",
+    description="Gmail tool for sending emails. Actions: 'send_to_list' (sends to predefined email list) and 'send' (sends to a specific email). Requires 'access_token' in params.",
+    args_schema=GmailToolInput
+)
+

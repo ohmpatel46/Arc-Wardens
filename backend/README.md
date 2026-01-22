@@ -35,6 +35,12 @@ backend/
 
 ## Setup
 
+
+```bash
+# Create virtual environment (recommended)
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
 1. Install dependencies:
 ```bash
 cd backend
@@ -50,7 +56,7 @@ pip install -r requirements.txt
 
 3. Run the server:
 ```bash
-python server.py
+python3 server.py
 ```
 
 Or using uvicorn directly:

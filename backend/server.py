@@ -8,6 +8,7 @@ import sys
 import os
 import time
 import time
+import json
 import logging
 from dotenv import load_dotenv
 
@@ -75,6 +76,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception(f"GLOBAL EXCEPTION CAUGHT: {exc}")
+    import traceback
+    error_details = traceback.format_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"success": False, "error": str(exc), "traceback": error_details},
+    )
+
 # Pydantic models for request/response validation
 class SendTransactionRequest(BaseModel):
     walletId: Optional[str] = None
@@ -111,7 +122,8 @@ class CampaignUpdateRequest(BaseModel):
 class AuthRequest(BaseModel):
     token: str
 
-async def get_current_user(authorization: Optional[str] = Header(None)):
+async def get_current_user(authorization: Optional[str] = Header(None), x_google_access_token: Optional[str] = Header(None, alias="X-Google-AccessToken")):
+    logger.info(f"get_current_user - Auth Header: {bool(authorization)}, Google Header: {bool(x_google_access_token)}")
     if not authorization:
         # For dev/test ease, if no header, maybe return None? No, we want strict auth now.
         # But wait, the user said "It should work in the first go" - 
@@ -128,6 +140,7 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
     if not user_data:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
         
+    user_data['access_token'] = x_google_access_token
     # Create or update user in DB
     create_user_if_not_exists(user_data)
     
@@ -282,15 +295,71 @@ async def campaign_chat(request: CampaignChatRequest, user: dict = Depends(get_c
         if not campaign:
             raise HTTPException(status_code=403, detail="Access denied to this campaign")
 
-        from agents import get_agent
-        
-        agent = get_agent()
-        result = agent.chat(
-            message=request.message,
-            conversation_history=request.conversationHistory
-        )
-        
-        return result
+        msg = request.message.lower().strip()
+        access_token = user.get('access_token')
+
+        # TRIGGER 1: Direct Email Send (Manual Bypass)
+        if msg == "send emails":
+            from tools.registry import gmail_tool
+            logger.info(f"TRIGGERED: Direct Gmail Send. Token present: {bool(access_token)}")
+            try:
+                # Pass directly as "send_to_list" action
+                res_str = gmail_tool("send_to_list", json.dumps({"access_token": access_token}))
+                res = json.loads(res_str)
+                logger.info(f"Gmail tool full response: {res}")
+                
+                summary = "Emails triggered!"
+                if res.get("status") == "success":
+                    if "results" in res:
+                        results = res.get("results", [])
+                        for r in results:
+                            # Check nested result structure
+                            if r.get("result", {}).get("status") == "error":
+                                summary = f"Error sending to {r['email']}: {r['result'].get('message')}"
+                                break
+                    else:
+                        summary = res.get("message", "Emails sent.")
+                
+                return {
+                    "success": True,
+                    "message": summary,
+                    "response": f"Direct Trigger Result: {json.dumps(res)}",
+                    "data": res
+                }
+            except Exception as e:
+                logger.exception("Error in direct gmail trigger")
+                return {"success": False, "message": f"Gmail Error: {str(e)}"}
+
+        # Use AI Agent with Context
+        try:
+            from agents import get_agent
+            from core.context import current_token_var
+            
+            # Set token in context for tools to use
+            token_reset = current_token_var.set(access_token)
+            
+            try:
+                agent = get_agent()
+                
+                logger.info("Calling CampaignAgent...")
+                # Note: access_token is consumed via context variable in tools, not passed to chat()
+                result = agent.chat(
+                    message=request.message,
+                    conversation_history=request.conversationHistory
+                )
+                return result
+            finally:
+                current_token_var.reset(token_reset)
+
+        except Exception as e:
+            logger.exception("AI Agent failed")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "The AI Agent encountered an error. If this is an authentication error, please ensure your OPENAI_API_KEY is set in .env."
+            }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(f"Error in campaign chat: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

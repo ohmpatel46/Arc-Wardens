@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from typing import List, Dict, Any, Optional
 import os
 import logging
+import json
 
 from .prompt_builder import get_campaign_agent_prompt
 from tools.registry import ALL_TOOLS
@@ -40,7 +41,8 @@ class CampaignAgent:
         self.llm = ChatGoogleGenerativeAI(
             model=model_name,
             temperature=temperature,
-            google_api_key=os.getenv("GOOGLE_API_KEY")
+            google_api_key=os.getenv("GOOGLE_API_KEY"),
+            convert_system_message_to_human=True
         )
         
         # Build the system prompt dynamically from MCP schemas
@@ -115,8 +117,7 @@ class CampaignAgent:
             return {
                 "success": True,
                 "message": response_text,
-                "response": response_text,
-                "content": response_text
+                "response": response_text
             }
             
         except Exception as e:
@@ -138,11 +139,10 @@ class CampaignAgent:
 
 
 # Singleton instance
+# Singleton instance
 _agent_instance: Optional[CampaignAgent] = None
 
-
 def get_agent() -> CampaignAgent:
-    """Get or create the agent instance."""
     global _agent_instance
     if _agent_instance is None:
         _agent_instance = CampaignAgent()

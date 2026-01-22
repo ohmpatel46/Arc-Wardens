@@ -1,5 +1,6 @@
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+import requests
 import os
 import logging
 
@@ -10,52 +11,77 @@ GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
 
 def verify_google_token(token):
     """
-    Verify a Google ID token and return the user info.
-    If GOOGLE_CLIENT_ID is not set, it attempts to decode without audience verification 
-    (NOT RECOMMENDED FOR PRODUCTION but useful for quick setup if client ID is unknown).
+    Verify a Google token (ID Token or Access Token) and return the user info.
     """
+    if not token:
+        return None
+        
     try:
+        # 1. Handle access token passed from frontend (prefixed for clarity)
+        if token.startswith('access_token_'):
+            access_token = token.replace('access_token_', '')
+            logger.info(f"Verifying access token: {access_token[:10]}...")
+            return verify_access_token(access_token)
+            
+        # 2. Handle mock token
+        if token.startswith('mock_token_'):
+            return _get_mock_user_from_token(token)
+
+        # 3. Handle ID Token (JWT)
         if GOOGLE_CLIENT_ID:
             try:
                 id_info = id_token.verify_oauth2_token(token, google_requests.Request(), GOOGLE_CLIENT_ID)
-            except ValueError:
-                # Allow mock token for development if configured
-                if os.getenv('FLASK_ENV') == 'development' or token.startswith('mock_token_'):
-                    return _get_mock_user_from_token(token)
-                raise
+                return {
+                    'user_id': id_info['sub'],
+                    'email': id_info.get('email'),
+                    'name': id_info.get('name'),
+                    'picture': id_info.get('picture')
+                }
+            except ValueError as e:
+                logger.warning(f"ID Token verification failed: {e}")
+                # If it's not a valid ID Token, it might be a raw access token
+                return verify_access_token(token)
         else:
-            logger.warning("GOOGLE_CLIENT_ID not set. Using mock verification for ANY token.")
-            # For strict security in prod, this should fail. For this "fix it" task, we allow mock.
-            if token.startswith('mock_token_'):
-                return _get_mock_user_from_token(token)
-            
-            # Fallback to loose verification if user really wants to try real tokens without client ID validation
+            # Fallback for real tokens if client ID is missing
             try:
                 id_info = id_token.verify_oauth2_token(token, google_requests.Request(), audience=None)
+                return {
+                    'user_id': id_info['sub'],
+                    'email': id_info.get('email'),
+                    'name': id_info.get('name'),
+                    'picture': id_info.get('picture')
+                }
             except:
-                return None
+                return verify_access_token(token)
 
-        userid = id_info['sub']
-        email = id_info.get('email')
-        name = id_info.get('name')
-        picture = id_info.get('picture')
-        
-        return {
-            'user_id': userid,
-            'email': email,
-            'name': name,
-            'picture': picture
-        }
-    except ValueError as e:
-        logger.error(f"Invalid token: {e}")
-        return None
     except Exception as e:
-        logger.error(f"Token verification error: {e}")
+        logger.exception(f"Unexpected token verification error: {e}")
+        return None
+
+def verify_access_token(access_token):
+    """Verify an access token via Google's userinfo endpoint"""
+    try:
+        # Using Header instead of query param for better compatibility
+        headers = {'Authorization': f'Bearer {access_token}'}
+        response = requests.get('https://www.googleapis.com/oauth2/v3/userinfo', headers=headers)
+        
+        if response.status_code == 200:
+            user_info = response.json()
+            return {
+                'user_id': user_info['sub'],
+                'email': user_info.get('email'),
+                'name': user_info.get('name'),
+                'picture': user_info.get('picture')
+            }
+        else:
+            logger.error(f"Google userinfo API returned {response.status_code}: {response.text}")
+            return None
+    except Exception as e:
+        logger.error(f"Access token verification error: {e}")
         return None
 
 def _get_mock_user_from_token(token):
     """Helper to generate mock user data from a mock token"""
-    # format: mock_token_USERID_EMAIL
     parts = token.split('_')
     if len(parts) >= 3:
         user_id = parts[2]

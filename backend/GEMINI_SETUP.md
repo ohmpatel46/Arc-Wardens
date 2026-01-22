@@ -18,7 +18,6 @@ This guide will help you set up Google Gemini API keys for the Arc Wardens campa
 
 4. **Copy your API key**
    - Copy the generated API key immediately (you won't be able to see it again)
-   - It will look something like: `AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz1234567`
 
 ## Step 2: Add API Key to Your Environment
 
