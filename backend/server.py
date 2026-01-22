@@ -425,4 +425,4 @@ async def health():
 if __name__ == '__main__':
     import uvicorn
     # Use reload=False when running directly, or run with: uvicorn server:app --reload
-    uvicorn.run(app, host="0.0.0.0", port=5000, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=5001, reload=False)

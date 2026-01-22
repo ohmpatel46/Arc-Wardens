@@ -4,7 +4,7 @@ Bridges the gap between MCP-style definitions and LangChain execution.
 """
 
 from typing import Dict, Any, Callable, List
-from langchain.tools import StructuredTool
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, create_model
 from typing import Optional
 import logging
