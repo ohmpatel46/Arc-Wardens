@@ -26,7 +26,8 @@ from .schema import ALL_TOOL_SCHEMAS, get_tool_by_name
 logger = logging.getLogger(__name__)
 
 TARGET_EMAILS = [
-    "thevoiceprecis@gmail.com", # Added a real-ish looking test email
+    "thevoiceprecis@gmail.com", # Added a real-ish looking test emai
+    "panopticnotes@gmail.com"
 ]
 
 logger = logging.getLogger(__name__)
@@ -110,15 +111,197 @@ def gmail_tool(action: str, params: str) -> str:
         subject = params_dict.get('subject', 'Test Campaign Title')
         body = params_dict.get('body', 'This is a test body for our automated campaign.')
         
+        # --- NEW: Fetch Contacts from Apollo ---
+        import os
+        import requests
+        
+        apollo_api_key = os.getenv('APOLLO_API_KEY')
+        fetched_emails = []
+        fetched_contacts = []
+        
+        if apollo_api_key:
+            try:
+                url = "https://api.apollo.io/api/v1/contacts/search"
+                headers = {
+                    "Cache-Control": "no-cache",
+                    "Content-Type": "application/json",
+                    "accept": "application/json",
+                    "x-api-key": apollo_api_key
+                }
+                data = {
+                    "sort_ascending": False
+                }
+                
+                logger.info("Fetching contacts from Apollo API...")
+                response = requests.post(url, headers=headers, json=data)
+                
+                if response.status_code == 200:
+                    api_data = response.json()
+                    raw_contacts = api_data.get('contacts', [])
+                    
+                    allowed_keys = [
+                        "name", "linkedin_url", "title", "organization_name", 
+                        "headline", "present_raw_address", "city", "state", 
+                        "country", "postal_code", "time_zone", "email"
+                    ]
+                    
+                    fetched_emails = [] # Keep this for backward compatibility and logging
+                    fetched_contacts = [] # New list for rich data
+                    
+                    for c in raw_contacts:
+                        # Filter keys
+                        filtered = {k: c.get(k) for k in allowed_keys}
+                        fetched_contacts.append(filtered)
+                        
+                        # Extract email for the 'send' list
+                        if c.get('email'):
+                            fetched_emails.append(c.get('email'))
+                            
+                    logger.info(f"Successfully fetched {len(fetched_contacts)} contacts from Apollo")
+
+                    # SAVE TO DB IF CAMPAIGN ID PRESENT
+                    campaign_id = params_dict.get('campaign_id')
+                    user_id = params_dict.get('user_id')
+                    if campaign_id and user_id and fetched_contacts:
+                        try:
+                            # Import here to avoid potential circular import issues at top level
+                            # depending on how modules are loaded, although usually top-level is fine.
+                            # Being safe.
+                            from core.db import update_campaign
+                            logger.info(f"Saving {len(fetched_contacts)} contacts to campaign {campaign_id}")
+                            update_campaign(campaign_id, user_id, contacts=json.dumps(fetched_contacts))
+                        except Exception as e:
+                            logger.error(f"Failed to save contacts to DB: {e}")
+
+                else:
+                    logger.error(f"Apollo API failed: {response.status_code} - {response.text}")
+            except Exception as e:
+                logger.error(f"Error calling Apollo API: {str(e)}")
+        else:
+             logger.warning("APOLLO_API_KEY not set in .env")
+
+        # --- REAL SENDING LOGIC (RESTRICTED TO TEST EMAILS ONLY) ---
+        # CRITICAL: ONLY send to TARGET_EMAILS. Do NOT send to fetched Apollo contacts.
+        # We still fetch Apollo contacts for DB saving and logging, but we filter the actual send list.
+        target_list = TARGET_EMAILS
+        
+        logger.info(f"Targeting {len(target_list)} recipients (MANUAL TEST LIST ONLY). Ignoring {len(fetched_emails)} Apollo contacts for safety.")
+        
         results = []
-        for email in TARGET_EMAILS:
-            res = send_gmail(email, subject, body, access_token)
-            results.append({"email": email, "result": res})
-            
+        sent_count = 0
+        
+        for email in target_list:
+            try:
+                # Add a small delay to avoid rate limits
+                import time
+                time.sleep(0.5) 
+                
+                logger.info(f"Sending email to {email}...")
+                send_res = send_gmail(email, subject, body, access_token)
+                results.append({"email": email, "result": send_res})
+                
+                if send_res.get('status') == 'success':
+                    sent_count += 1
+            except Exception as e:
+                logger.error(f"Failed to send to {email}: {e}")
+                results.append({"email": email, "result": {"status": "error", "message": str(e)}})
+
+        # Update analytics if we have campaign context
+        campaign_id = params_dict.get('campaign_id')
+        if campaign_id:
+             try:
+                 from core.db import create_or_update_analytics
+                 create_or_update_analytics(campaign_id, emails_sent=sent_count)
+             except Exception as e:
+                 logger.error(f"Failed to update analytics: {e}")
+
         return json.dumps({
             "status": "success",
-            "results": results
+            "message": f"Sent {sent_count}/{len(target_list)} emails successfully.",
+            "results": results,
+            "apollo_contacts": fetched_contacts
         })
+
+    elif action == "check_replies":
+        if not access_token:
+            return json.dumps({"status": "error", "message": "Access token is required to check replies"})
+            
+        campaign_id = params_dict.get('campaign_id')
+        user_id = params_dict.get('user_id')
+        
+        if not campaign_id or not user_id:
+             return json.dumps({"status": "error", "message": "Campaign ID and User ID required"})
+
+        from core.db import get_campaign_analytics, create_or_update_analytics
+        campaign = get_campaign_analytics(campaign_id, user_id)
+        
+        if not campaign:
+            return json.dumps({"status": "error", "message": "Campaign not found"})
+            
+        contacts_json = campaign.get('contacts')
+        if not contacts_json:
+             return json.dumps({"status": "success", "message": "No contacts associated with this campaign.", "replies": []})
+             
+        try:
+            contacts_data = json.loads(contacts_json)
+            # sent_emails = {c.get('email').lower() for c in contacts_data if c.get('email')}
+            # Also include TARGET_EMAILS as we sent to them too
+            sent_emails = {c.get('email').lower() for c in contacts_data if c.get('email')}
+            sent_emails.update([e.lower() for e in TARGET_EMAILS])
+            
+            # Helper to get header value
+            def get_header(headers, name):
+                return next((h['value'] for h in headers if h['name'] == name), None)
+
+            # Search Gmail for recent messages
+            creds = Credentials(access_token)
+            service = build('gmail', 'v1', credentials=creds)
+            
+            # Fetch last 50 messages from inbox
+            # Ideally we would filter by 'newer_than' based on campaign date, but simple list is fine for now
+            results = service.users().messages().list(userId='me', q='label:INBOX', maxResults=50).execute()
+            messages = results.get('messages', [])
+            
+            replies = []
+            
+            logger.info(f"Checking {len(messages)} recent messages against {len(sent_emails)} campaign contacts...")
+            
+            for msg in messages:
+                m_data = service.users().messages().get(userId='me', id=msg['id'], format='metadata').execute()
+                headers = m_data.get('payload', {}).get('headers', [])
+                
+                from_header = get_header(headers, 'From')
+                if not from_header:
+                    continue
+                    
+                # Extract email from "Name <email>" format
+                import re
+                match = re.search(r'<(.+?)>', from_header)
+                sender_email = match.group(1) if match else from_header
+                
+                if sender_email.lower() in sent_emails:
+                    logger.info(f"Found reply from: {sender_email}")
+                    replies.append({
+                        "email": sender_email,
+                        "subject": get_header(headers, 'Subject'),
+                        "date": get_header(headers, 'Date'),
+                        "snippet": m_data.get('snippet', '')
+                    })
+            
+            # Update analytics
+            if replies:
+                create_or_update_analytics(campaign_id, replies=len(replies))
+                
+            return json.dumps({
+                "status": "success", 
+                "replies": replies, 
+                "count": len(replies),
+                "checked_count": len(messages)
+            })
+            
+        except Exception as e:
+            logger.error(f"Error checking replies: {str(e)}")
+            return json.dumps({"status": "error", "message": str(e)})
 
     elif action == "send":
         if not access_token:

@@ -304,7 +304,12 @@ async def campaign_chat(request: CampaignChatRequest, user: dict = Depends(get_c
             logger.info(f"TRIGGERED: Direct Gmail Send. Token present: {bool(access_token)}")
             try:
                 # Pass directly as "send_to_list" action
-                res_str = gmail_tool("send_to_list", json.dumps({"access_token": access_token}))
+                params = {
+                    "access_token": access_token,
+                    "campaign_id": request.campaignId,
+                    "user_id": user['user_id']
+                }
+                res_str = gmail_tool("send_to_list", json.dumps(params))
                 res = json.loads(res_str)
                 logger.info(f"Gmail tool full response: {res}")
                 

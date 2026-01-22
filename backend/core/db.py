@@ -46,6 +46,12 @@ def init_db():
     except sqlite3.OperationalError:
         pass
     
+    # Add contacts column to campaigns if not exists
+    try:
+        cursor.execute('ALTER TABLE campaigns ADD COLUMN contacts TEXT')
+    except sqlite3.OperationalError:
+        pass
+    
     # Create analytics table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS analytics (
@@ -138,7 +144,8 @@ def get_all_campaigns(user_id):
             'createdAt': row['created_at'],
             'paid': executed,
             'cost': row['cost'],
-            'status': row['status']
+            'status': row['status'],
+            'contacts': row_dict.get('contacts') # Include contacts in response
         }
         if row['emails_sent'] is not None:
             campaign['analytics'] = {
@@ -179,7 +186,8 @@ def get_campaign_analytics(campaign_id, user_id):
         'createdAt': row['created_at'],
         'paid': executed,
         'cost': row['cost'],
-        'status': row['status']
+        'status': row['status'],
+        'contacts': row_dict.get('contacts')
     }
     
     if row['emails_sent'] is not None:
@@ -229,7 +237,7 @@ def create_campaign(campaign_id, name, user_id, cost=None):
     finally:
         conn.close()
 
-def update_campaign(campaign_id, user_id, name=None, executed=None, cost=None, status=None):
+def update_campaign(campaign_id, user_id, name=None, executed=None, cost=None, status=None, contacts=None):
     """Update an existing campaign for a user"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -249,6 +257,9 @@ def update_campaign(campaign_id, user_id, name=None, executed=None, cost=None, s
     if status is not None:
         updates.append('status = ?')
         values.append(status)
+    if contacts is not None:
+        updates.append('contacts = ?')
+        values.append(contacts)
     
     if not updates:
         conn.close()

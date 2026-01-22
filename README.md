@@ -115,3 +115,12 @@ The frontend uses Vite for fast development with hot module replacement. The bac
 ## License
 
 MIT
+
+
+TO DOS HERE 
+
+
+1. send bulk emails
+2. see if we can get the emails that have responded back to the thing
+3. for a particular campaign, when the the payment has been done, save the filtered apollo API response (the name, email, etc.) in the db for that campaign
+4. add a page for checking who all have replied to the email - and also see if there's a way to directly open the email chat by clicking on the hyperlink 
