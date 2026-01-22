@@ -99,21 +99,6 @@ The frontend will run on `http://localhost:3000` and proxy API requests to the b
 
 Create a `.env` file in the project root with:
 
-```env
-CIRCLE_API_KEY=your_api_key
-CIRCLE_ENTITY_SECRET_BASE64=your_entity_secret_base64
-CIRCLE_PUBLIC_KEY_PEM=your_public_key_pem
-CIRCLE_WALLET_SET_ID=your_wallet_set_id (optional)
-CIRCLE_WALLET_ID=your_wallet_id (optional)
-CIRCLE_WALLET_ADDRESS=your_wallet_address (optional)
-CIRCLE_USDC_TESTNET_TOKEN_ID=your_token_id (optional)
-CIRCLE_SENDER_WALLET_ID=your_sender_wallet_id (optional)
-CIRCLE_RECEIVER_ADDRESS=your_receiver_address (optional)
-CIRCLE_SEND_AMOUNT=1 (optional)
-CIRCLE_BLOCKCHAIN=ARC-TESTNET (optional)
-CIRCLE_WALLET_SET_NAME=ArcWardens WalletSet (optional)
-```
-
 ## API Endpoints
 
 - `GET /api/health` - Health check

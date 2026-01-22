@@ -19,7 +19,7 @@ export const DEFAULT_ANALYTICS = {
   bounceRate: 2.4
 }
 
-export const CAMPAIGN_COST = 1
+export const CAMPAIGN_COST = 0.1
 
 function App() {
   const { user, logout, loading: authLoading } = useAuth()
