@@ -479,7 +479,10 @@ async def campaign_update(request: CampaignUpdateRequest, user: dict = Depends(g
 async def campaign_delete(campaignId: str = Query(..., description="Campaign ID to delete"), user: dict = Depends(get_current_user)):
     """Delete a campaign from the database"""
     try:
-        delete_campaign(campaignId, user['user_id'])
+        success = delete_campaign(campaignId, user['user_id'])
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Campaign {campaignId} not found or access denied")
+            
         return {
             'success': True,
             'message': f'Campaign {campaignId} deleted successfully'

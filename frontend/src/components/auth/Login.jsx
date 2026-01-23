@@ -96,7 +96,7 @@ export default function Login() {
 
                         <button
                             onClick={() => {
-                                const mockToken = `mock_token_${Date.now()}_demo_user`;
+                                const mockToken = `mock_token_fixed_demo_user_123`;
                                 login({ credential: mockToken }, 'mock_access_token');
                             }}
                             className={`w-full font-semibold py-3.5 px-4 rounded-xl transition duration-200 flex items-center justify-center gap-2 
