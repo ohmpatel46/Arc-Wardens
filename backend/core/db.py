@@ -66,10 +66,70 @@ def init_db():
         )
     ''')
     
+    # Create responses table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS campaign_responses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id TEXT NOT NULL,
+            email TEXT NOT NULL,
+            response TEXT NOT NULL,
+            received_at TEXT NOT NULL,
+            FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
+# ... (existing functions) ...
+
+def add_campaign_response(campaign_id, email, response):
+    """Add a customer response to the database"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            INSERT INTO campaign_responses (campaign_id, email, response, received_at)
+            VALUES (?, ?, ?, ?)
+        ''', (campaign_id, email, response, datetime.now().isoformat()))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error adding response: {e}")
+        return False
+    finally:
+        conn.close()
+
+def get_campaign_responses(campaign_id):
+    """Get all responses for a campaign"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT * FROM campaign_responses 
+        WHERE campaign_id = ?
+        ORDER BY received_at DESC
+    ''', (campaign_id,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    responses = []
+    for row in rows:
+        responses.append({
+            'id': row['id'],
+            'campaignId': row['campaign_id'],
+            'email': row['email'],
+            'response': row['response'], # This maps to 'snippet' for frontend compatibility
+            'snippet': row['response'],
+            'receivedAt': row['received_at'],
+            'subject': 'Customer Response'
+        })
+    return responses
+
 def get_db_connection():
+
     """Get a database connection"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row

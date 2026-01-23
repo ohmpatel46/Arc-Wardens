@@ -200,8 +200,16 @@ def gmail_tool(action: str, params: str) -> str:
                 import time
                 time.sleep(0.5) 
                 
+                # --- ADD RESPONSE LINK ---
+                response_link = f"http://localhost:3000/customerResponse?email={email}"
+                if campaign_id:
+                    response_link += f"&campaignId={campaign_id}"
+                
+                modified_body = body + f"\n\n---\nReply specifically to this campaign here: {response_link}"
+                # -------------------------
+
                 logger.info(f"Sending email to {email}...")
-                send_res = send_gmail(email, subject, body, access_token)
+                send_res = send_gmail(email, subject, modified_body, access_token)
                 results.append({"email": email, "result": send_res})
                 
                 if send_res.get('status') == 'success':

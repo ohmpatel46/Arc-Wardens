@@ -13,6 +13,8 @@ import { DEFAULT_ANALYTICS, CAMPAIGN_COST } from './constants'
 
 const API_BASE = '/api'
 
+import CustomerResponse from './components/customer/CustomerResponse'
+
 function App() {
   const { user, logout, loading: authLoading } = useAuth()
 
@@ -439,6 +441,10 @@ function App() {
       setActiveCampaignId(null)
       setShowWallet(false)
     }
+  }
+
+  if (window.location.pathname === '/customerResponse') {
+    return <CustomerResponse />
   }
 
   if (authLoading) return <div className="h-screen flex items-center justify-center"><LoadingSpinner /></div>

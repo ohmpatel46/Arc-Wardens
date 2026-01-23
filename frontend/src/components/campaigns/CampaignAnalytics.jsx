@@ -62,7 +62,8 @@ export default function CampaignAnalytics({ campaign, replies = [] }) {
   }, [campaign])
 
   const getStatus = (email) => {
-    const reply = replies.find(r => r.email.toLowerCase() === email.toLowerCase())
+    if (!email) return <span className="text-gray-400">-</span>;
+    const reply = replies.find(r => r.email && r.email.toLowerCase() === email.toLowerCase())
     if (reply) return (
       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
         <span className="w-1.5 h-1.5 bg-blue-500 rounded-full mr-1.5"></span>

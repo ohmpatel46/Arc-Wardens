@@ -38,9 +38,10 @@ from core.db import (
     create_campaign,
     update_campaign,
     delete_campaign,
-    delete_campaign,
     create_or_update_analytics,
-    create_user_if_not_exists
+    create_user_if_not_exists,
+    add_campaign_response,
+    get_campaign_responses
 )
 from core.auth import verify_google_token
 from fastapi import Header, Depends
@@ -48,6 +49,38 @@ from fastapi import Header, Depends
 app = FastAPI(title="Arc Wardens API", version="1.0.0")
 
 # Add exception handler for validation errors
+
+# --- Customer Response Model ---
+class CustomerResponseRequest(BaseModel):
+    email: str
+    campaignId: str
+    response: str
+
+@app.post("/api/response")
+async def receive_customer_response(data: CustomerResponseRequest):
+    """
+    Endpoint to receive customer responses from the email link UI.
+    """
+    print(f"Received response from {data.email} for campaign {data.campaignId}: {data.response}")
+    
+    # Save response to database
+    try:
+        success = add_campaign_response(data.campaignId, data.email, data.response)
+        if success:
+            logger.info(f"Saved response for campaign {data.campaignId}")
+            
+            # TODO: Increment reply count in analytics properly
+            # For now, we rely on the list view
+    except Exception as e:
+        logger.error(f"Failed to save response: {e}")
+
+    return {"success": True, "message": "Response received"}
+# -------------------------------
+
+
+
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     logger.error(f"Validation error: {exc.errors()}")
@@ -408,23 +441,14 @@ async def campaign_pay(request: CampaignPayRequest, user: dict = Depends(get_cur
 async def verify_campaign_status(campaign_id: str, user: dict = Depends(get_current_user)):
     """Check for replies and update status"""
     try:
-        access_token = user.get('access_token')
-        if not access_token:
-            return {"success": False, "message": "No access token"}
-            
-        from tools.registry import gmail_tool
-        
-        params = {
-            "access_token": access_token,
-            "campaign_id": campaign_id,
-            "user_id": user['user_id']
-        }
-        res_str = gmail_tool("check_replies", json.dumps(params))
-        res = json.loads(res_str)
+        # Fetch responses from our local database
+        db_replies = get_campaign_responses(campaign_id)
         
         return {
             "success": True,
-            "data": res
+            "data": {
+                "replies": db_replies
+            }
         }
     except Exception as e:
         logger.exception(f"Error checking status: {str(e)}")
