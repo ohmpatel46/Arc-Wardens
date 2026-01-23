@@ -59,33 +59,84 @@ def create_all_langchain_tools() -> List[StructuredTool]:
 
 
 def execute_apollo_search_people(
-    query: str,
+    query: str = "",
     person_titles: Optional[List[str]] = None,
     person_locations: Optional[List[str]] = None,
     person_seniorities: Optional[List[str]] = None,
-    limit: int = 25
+    limit: int = 25,
+    # Extra parameters for DB integration
+    campaign_id: Optional[str] = None,
+    user_id: Optional[str] = None
 ) -> str:
     """Execute Apollo people search."""
-    logger.info(f"Apollo search_people: query={query}, titles={person_titles}, locations={person_locations}, limit={limit}")
+    logger.info(f"Apollo search_people: query={query}, campaign_id={campaign_id}")
     
-    # TODO: Implement actual Apollo API call
+    import os
+    import requests
+    import json
+    
+    apollo_api_key = os.getenv('APOLLO_API_KEY')
+    fetched_contacts = []
+    
+    if apollo_api_key:
+        try:
+            url = "https://api.apollo.io/api/v1/contacts/search"
+            headers = {
+                "Cache-Control": "no-cache",
+                "Content-Type": "application/json",
+                "accept": "application/json",
+                "x-api-key": apollo_api_key
+            }
+            # Currently we are using a simple default search, but we could use the params
+            data = {
+                "sort_ascending": False,
+                "q_organization_domains": query if query else None
+            }
+            
+            logger.info("Fetching contacts from Apollo API...")
+            response = requests.post(url, headers=headers, json=data)
+            
+            if response.status_code == 200:
+                api_data = response.json()
+                raw_contacts = api_data.get('contacts', [])
+                
+                allowed_keys = [
+                    "name", "linkedin_url", "title", "organization_name", 
+                    "headline", "present_raw_address", "city", "state", 
+                    "country", "postal_code", "time_zone", "email"
+                ]
+                
+                for c in raw_contacts:
+                    # Filter keys
+                    filtered = {k: c.get(k) for k in allowed_keys}
+                    fetched_contacts.append(filtered)
+                        
+                logger.info(f"Successfully fetched {len(fetched_contacts)} contacts from Apollo")
+
+                # SAVE TO DB IF CAMPAIGN ID PRESENT
+                if campaign_id and user_id and fetched_contacts:
+                    try:
+                        from core.db import update_campaign
+                        logger.info(f"Saving {len(fetched_contacts)} contacts to campaign {campaign_id}")
+                        update_campaign(campaign_id, user_id, contacts=json.dumps(fetched_contacts))
+                    except Exception as e:
+                        logger.error(f"Failed to save contacts to DB: {e}")
+
+            else:
+                logger.error(f"Apollo API failed: {response.status_code} - {response.text}")
+        except Exception as e:
+            logger.error(f"Error calling Apollo API: {str(e)}")
+    else:
+            logger.warning("APOLLO_API_KEY not set in .env")
+
     return json.dumps({
         "status": "success",
-        "message": "Apollo search_people - placeholder implementation",
-        "results": [],
-        "count": 0,
-        "query": query,
-        "filters_applied": {
-            "titles": person_titles,
-            "locations": person_locations,
-            "seniorities": person_seniorities
-        }
+        "message": "Apollo search completed",
+        "results": fetched_contacts,
+        "count": len(fetched_contacts)
     })
 
-
-
-
-
+# ... existing gmail_tool signature ...
 def gmail_tool(action: str, params: str) -> str:
     """
     Gmail tool for sending emails and managing email campaigns.
@@ -111,74 +162,27 @@ def gmail_tool(action: str, params: str) -> str:
         subject = params_dict.get('subject', 'Test Campaign Title')
         body = params_dict.get('body', 'This is a test body for our automated campaign.')
         
-        # --- NEW: Fetch Contacts from Apollo ---
-        import os
-        import requests
+        # --- CALL SEPARATED APOLLO FUNCTION ---
+        campaign_id = params_dict.get('campaign_id')
+        user_id = params_dict.get('user_id')
         
-        apollo_api_key = os.getenv('APOLLO_API_KEY')
-        fetched_emails = []
         fetched_contacts = []
+        fetched_emails = []
         
-        if apollo_api_key:
-            try:
-                url = "https://api.apollo.io/api/v1/contacts/search"
-                headers = {
-                    "Cache-Control": "no-cache",
-                    "Content-Type": "application/json",
-                    "accept": "application/json",
-                    "x-api-key": apollo_api_key
-                }
-                data = {
-                    "sort_ascending": False
-                }
-                
-                logger.info("Fetching contacts from Apollo API...")
-                response = requests.post(url, headers=headers, json=data)
-                
-                if response.status_code == 200:
-                    api_data = response.json()
-                    raw_contacts = api_data.get('contacts', [])
-                    
-                    allowed_keys = [
-                        "name", "linkedin_url", "title", "organization_name", 
-                        "headline", "present_raw_address", "city", "state", 
-                        "country", "postal_code", "time_zone", "email"
-                    ]
-                    
-                    fetched_emails = [] # Keep this for backward compatibility and logging
-                    fetched_contacts = [] # New list for rich data
-                    
-                    for c in raw_contacts:
-                        # Filter keys
-                        filtered = {k: c.get(k) for k in allowed_keys}
-                        fetched_contacts.append(filtered)
-                        
-                        # Extract email for the 'send' list
-                        if c.get('email'):
-                            fetched_emails.append(c.get('email'))
-                            
-                    logger.info(f"Successfully fetched {len(fetched_contacts)} contacts from Apollo")
-
-                    # SAVE TO DB IF CAMPAIGN ID PRESENT
-                    campaign_id = params_dict.get('campaign_id')
-                    user_id = params_dict.get('user_id')
-                    if campaign_id and user_id and fetched_contacts:
-                        try:
-                            # Import here to avoid potential circular import issues at top level
-                            # depending on how modules are loaded, although usually top-level is fine.
-                            # Being safe.
-                            from core.db import update_campaign
-                            logger.info(f"Saving {len(fetched_contacts)} contacts to campaign {campaign_id}")
-                            update_campaign(campaign_id, user_id, contacts=json.dumps(fetched_contacts))
-                        except Exception as e:
-                            logger.error(f"Failed to save contacts to DB: {e}")
-
-                else:
-                    logger.error(f"Apollo API failed: {response.status_code} - {response.text}")
-            except Exception as e:
-                logger.error(f"Error calling Apollo API: {str(e)}")
-        else:
-             logger.warning("APOLLO_API_KEY not set in .env")
+        try:
+             # Call the now separate Apollo tool
+             apollo_res_str = execute_apollo_search_people(
+                 query="", # Default or extract from params if needed
+                 campaign_id=campaign_id,
+                 user_id=user_id
+             )
+             apollo_res = json.loads(apollo_res_str)
+             if apollo_res.get("status") == "success":
+                 fetched_contacts = apollo_res.get("results", [])
+                 # Extract emails for logging/count (remember we DON'T send to them)
+                 fetched_emails = [c.get("email") for c in fetched_contacts if c.get("email")]
+        except Exception as e:
+            logger.error(f"Error calling execute_apollo_search_people: {e}")
 
         # --- REAL SENDING LOGIC (RESTRICTED TO TEST EMAILS ONLY) ---
         # CRITICAL: ONLY send to TARGET_EMAILS. Do NOT send to fetched Apollo contacts.

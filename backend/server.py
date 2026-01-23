@@ -299,41 +299,14 @@ async def campaign_chat(request: CampaignChatRequest, user: dict = Depends(get_c
         access_token = user.get('access_token')
 
         # TRIGGER 1: Direct Email Send (Manual Bypass)
+        # TRIGGER 1: Direct Email Send (Manual Bypass) - DISABLED (Functionality moved to Payment)
         if msg == "send emails":
-            from tools.registry import gmail_tool
-            logger.info(f"TRIGGERED: Direct Gmail Send. Token present: {bool(access_token)}")
-            try:
-                # Pass directly as "send_to_list" action
-                params = {
-                    "access_token": access_token,
-                    "campaign_id": request.campaignId,
-                    "user_id": user['user_id']
-                }
-                res_str = gmail_tool("send_to_list", json.dumps(params))
-                res = json.loads(res_str)
-                logger.info(f"Gmail tool full response: {res}")
-                
-                summary = "Emails triggered!"
-                if res.get("status") == "success":
-                    if "results" in res:
-                        results = res.get("results", [])
-                        for r in results:
-                            # Check nested result structure
-                            if r.get("result", {}).get("status") == "error":
-                                summary = f"Error sending to {r['email']}: {r['result'].get('message')}"
-                                break
-                    else:
-                        summary = res.get("message", "Emails sent.")
-                
-                return {
-                    "success": True,
-                    "message": summary,
-                    "response": f"Direct Trigger Result: {json.dumps(res)}",
-                    "data": res
-                }
-            except Exception as e:
-                logger.exception("Error in direct gmail trigger")
-                return {"success": False, "message": f"Gmail Error: {str(e)}"}
+            return {
+                "success": True, 
+                "message": "Please click the 'Pay' button to launch your campaign and send emails.",
+                "response": "Email sending is now triggered via the Payment flow."
+            }
+
 
         # Use AI Agent with Context
         try:
@@ -382,25 +355,79 @@ async def campaign_pay(request: CampaignPayRequest, user: dict = Depends(get_cur
             status='active'
         )
         
-        # Generate sample analytics for the paid campaign
-        from core.db import generate_sample_analytics
-        sample_analytics = generate_sample_analytics(request.campaignId)
+        # --- TRIGGER EMAIL SENDING ON PAYMENT ---
+        access_token = user.get('access_token')
+        emails_sent = 0
+        
+        if access_token:
+            from tools.registry import gmail_tool
+            logger.info(f"Payment successful. Triggering email campaign {request.campaignId}")
+            
+            params = {
+                "access_token": access_token,
+                "campaign_id": request.campaignId,
+                "user_id": user['user_id']
+            }
+            try:
+                res_str = gmail_tool("send_to_list", json.dumps(params))
+                res = json.loads(res_str)
+                
+                # Parse results for analytics
+                if res.get("status") == "success":
+                    # Count successful results
+                    results = res.get("results", [])
+                    emails_sent = sum(1 for r in results if r.get("result", {}).get("status") == "success")
+                
+                logger.info(f"Campaign triggered. Sent {emails_sent} emails.")
+                
+            except Exception as e:
+                logger.error(f"Failed to trigger emails after payment: {e}")
+        else:
+            logger.warning("No access_token found during payment. Cannot trigger emails.")
+
+        # Update real analytics
         create_or_update_analytics(
-            request.campaignId,
-            emails_sent=sample_analytics['emailsSent'],
-            emails_opened=sample_analytics['emailsOpened'],
-            replies=sample_analytics['replies'],
-            bounce_rate=sample_analytics['bounceRate']
+             request.campaignId,
+             emails_sent=emails_sent,
+             emails_opened=0,
+             replies=0,
+             bounce_rate=0.0
         )
         
         return {
             'success': True,
-            'message': f'Payment processed for campaign {request.campaignId}',
+            'message': f'Payment processed and campaign launched! Sent {emails_sent} emails.',
             'amount': request.amount,
             'transactionId': f'tx_{request.campaignId}_{int(time.time())}'
         }
     except Exception as e:
         logger.exception(f"Error processing payment: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/campaigns/{campaign_id}/verify_status")
+async def verify_campaign_status(campaign_id: str, user: dict = Depends(get_current_user)):
+    """Check for replies and update status"""
+    try:
+        access_token = user.get('access_token')
+        if not access_token:
+            return {"success": False, "message": "No access token"}
+            
+        from tools.registry import gmail_tool
+        
+        params = {
+            "access_token": access_token,
+            "campaign_id": campaign_id,
+            "user_id": user['user_id']
+        }
+        res_str = gmail_tool("check_replies", json.dumps(params))
+        res = json.loads(res_str)
+        
+        return {
+            "success": True,
+            "data": res
+        }
+    except Exception as e:
+        logger.exception(f"Error checking status: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/campaign/create")
