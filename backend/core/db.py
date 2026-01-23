@@ -52,6 +52,24 @@ def init_db():
     except sqlite3.OperationalError:
         pass
     
+    # Add tool_calls column to campaigns for workflow state
+    try:
+        cursor.execute('ALTER TABLE campaigns ADD COLUMN tool_calls TEXT')
+    except sqlite3.OperationalError:
+        pass
+    
+    # Add messages column to campaigns for conversation history
+    try:
+        cursor.execute('ALTER TABLE campaigns ADD COLUMN messages TEXT')
+    except sqlite3.OperationalError:
+        pass
+    
+    # Add pending_cost column to campaigns for payment state
+    try:
+        cursor.execute('ALTER TABLE campaigns ADD COLUMN pending_cost REAL DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+    
     # Create analytics table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS analytics (
@@ -198,14 +216,26 @@ def get_all_campaigns(user_id):
         row_dict = dict(row)
         executed = bool(row_dict.get('executed') or row_dict.get('paid') or False)
         
+        # Parse messages from JSON if stored
+        messages = []
+        if row_dict.get('messages'):
+            import json
+            try:
+                messages = json.loads(row_dict.get('messages'))
+            except:
+                pass
+        
         campaign = {
             'id': row['id'],
             'name': row['name'],
             'createdAt': row['created_at'],
             'paid': executed,
+            'executed': executed,
             'cost': row['cost'],
             'status': row['status'],
-            'contacts': row_dict.get('contacts') # Include contacts in response
+            'contacts': row_dict.get('contacts'),
+            'messages': messages,  # Include conversation history
+            'pendingCost': row_dict.get('pending_cost') or 0  # Include pending payment cost
         }
         if row['emails_sent'] is not None:
             campaign['analytics'] = {
@@ -240,14 +270,27 @@ def get_campaign_analytics(campaign_id, user_id):
     row_dict = dict(row)
     executed = bool(row_dict.get('executed') or row_dict.get('paid') or False)
     
+    # Parse messages from JSON if stored
+    messages = []
+    if row_dict.get('messages'):
+        import json
+        try:
+            messages = json.loads(row_dict.get('messages'))
+        except:
+            pass
+    
     campaign = {
         'id': row['id'],
         'name': row['name'],
         'createdAt': row['created_at'],
         'paid': executed,
+        'executed': executed,
         'cost': row['cost'],
         'status': row['status'],
-        'contacts': row_dict.get('contacts')
+        'contacts': row_dict.get('contacts'),
+        'tool_calls': row_dict.get('tool_calls'),
+        'messages': messages,  # Include conversation history
+        'pendingCost': row_dict.get('pending_cost') or 0  # Include pending payment cost
     }
     
     if row['emails_sent'] is not None:
@@ -297,7 +340,7 @@ def create_campaign(campaign_id, name, user_id, cost=None):
     finally:
         conn.close()
 
-def update_campaign(campaign_id, user_id, name=None, executed=None, cost=None, status=None, contacts=None):
+def update_campaign(campaign_id, user_id, name=None, executed=None, cost=None, status=None, contacts=None, messages=None, pending_cost=None):
     """Update an existing campaign for a user"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -320,6 +363,12 @@ def update_campaign(campaign_id, user_id, name=None, executed=None, cost=None, s
     if contacts is not None:
         updates.append('contacts = ?')
         values.append(contacts)
+    if messages is not None:
+        updates.append('messages = ?')
+        values.append(messages)
+    if pending_cost is not None:
+        updates.append('pending_cost = ?')
+        values.append(pending_cost)
     
     if not updates:
         conn.close()

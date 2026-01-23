@@ -60,6 +60,8 @@ function App() {
 
   const [currentWalletAddress, setCurrentWalletAddress] = useState('')
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [pendingCost, setPendingCost] = useState(0)
+  const [isPaymentPending, setIsPaymentPending] = useState(false)
 
   // Delete confirmation state
   const [showDeleteModal, setShowDeleteModal] = useState(false)
@@ -89,6 +91,17 @@ function App() {
   useEffect(() => {
     const campaign = campaigns.find(c => c.id === activeCampaignId)
     setMessages(campaign?.messages || [])
+    
+    // Restore payment pending state from campaign
+    const campaignPendingCost = campaign?.pendingCost || 0
+    // Only show payment pending if campaign is not already executed/paid
+    if (campaignPendingCost > 0 && !campaign?.executed && !campaign?.paid) {
+      setPendingCost(campaignPendingCost)
+      setIsPaymentPending(true)
+    } else {
+      setPendingCost(0)
+      setIsPaymentPending(false)
+    }
   }, [activeCampaignId, campaigns])
 
   const fetchCampaignsFromDB = async () => {
@@ -234,6 +247,22 @@ function App() {
     setCampaigns(campaigns.map(c => c.id === activeCampaignId ? { ...c, ...updates } : c))
   }
 
+  // Save messages and pending cost to database
+  const saveMessagesToDB = async (campaignId, messagesArray, costToSave = null) => {
+    try {
+      const updateData = {
+        campaignId: campaignId,
+        messages: messagesArray
+      }
+      if (costToSave !== null) {
+        updateData.pendingCost = costToSave
+      }
+      await axios.put(`${API_BASE}/campaign/update`, updateData)
+    } catch (error) {
+      console.error('Error saving messages to database:', error)
+    }
+  }
+
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return
 
@@ -258,14 +287,27 @@ function App() {
       if (typeof contentValue !== 'string') {
         contentValue = JSON.stringify(contentValue, null, 2)
       }
+      
+      // Handle cost from response
+      const cost = responseData.cost || 0
+      if (cost > 0) {
+        setPendingCost(cost)
+        setIsPaymentPending(true)
+      } else {
+        setPendingCost(0)
+        setIsPaymentPending(false)
+      }
+      
       const aiMessage = {
         role: 'assistant',
         content: contentValue
       }
-
       const updatedMessages = [...newMessages, aiMessage]
       setMessages(updatedMessages)
-      updateCampaign({ messages: updatedMessages })
+      updateCampaign({ messages: updatedMessages, pendingCost: cost })
+      
+      // Persist messages and pending cost to database
+      saveMessagesToDB(activeCampaignId, updatedMessages, cost)
     } catch (error) {
       console.error('Error sending message:', error)
       let errorMessage = 'Sorry, I encountered an error. Please try again.'
@@ -281,10 +323,13 @@ function App() {
         errorMessage = error.message || errorMessage
       }
 
-      setMessages([...newMessages, {
+      const errorMessages = [...newMessages, {
         role: 'assistant',
         content: errorMessage
-      }])
+      }]
+      setMessages(errorMessages)
+      // Save even error messages so user doesn't lose context
+      saveMessagesToDB(activeCampaignId, errorMessages)
     } finally {
       setIsLoading(false)
     }
@@ -298,11 +343,12 @@ function App() {
   const processPayment = async () => {
     setIsLoading(true)
     try {
+      const paymentAmount = pendingCost > 0 ? pendingCost : CAMPAIGN_COST
       // 1. Send transaction (walletId will be picked up from .env by backend if empty)
       const sendRes = await axios.post(`${API_BASE}/wallet/send`, {
         walletId: '',
         receiverAddress: '',
-        amount: CAMPAIGN_COST.toString(),
+        amount: paymentAmount.toString(),
         tokenId: ''
       })
 
@@ -310,19 +356,34 @@ function App() {
         // 2. Mark campaign as paid
         const payRes = await axios.post(`${API_BASE}/campaign/pay`, {
           campaignId: activeCampaignId,
-          amount: CAMPAIGN_COST
+          amount: paymentAmount
         })
 
         if (payRes.data.success) {
-          // Update local state
+          // Add success message to conversation
+          const successMessage = {
+            role: 'assistant',
+            content: payRes.data.message || `Payment successful! Campaign has been launched.`
+          }
+          const updatedMessages = [...messages, successMessage]
+          setMessages(updatedMessages)
+          
+          // Save messages to DB immediately with pending cost reset to 0
+          await saveMessagesToDB(activeCampaignId, updatedMessages, 0)
+          
+          // Update local campaign state with messages preserved
           setCampaigns(campaigns.map(c =>
-            c.id === activeCampaignId ? { ...c, paid: true, analytics: DEFAULT_ANALYTICS } : c // Reset or set analytics
+            c.id === activeCampaignId 
+              ? { ...c, paid: true, executed: true, messages: updatedMessages, analytics: DEFAULT_ANALYTICS } 
+              : c
           ))
 
-          // Refresh campaigns to get the full updated object including generated analytics from backend
-          fetchCampaignsFromDB()
+          // Note: Don't call fetchCampaignsFromDB() here - it's been saved to DB already
+          // and local state is correct. Fetching would be redundant and can cause flicker.
 
           setShowPaymentModal(false)
+          setPendingCost(0)
+          setIsPaymentPending(false)
 
           // Refresh wallet balance immediately and multiple times to capture the update
           fetchWalletData()
@@ -333,7 +394,15 @@ function App() {
       }
     } catch (error) {
       console.error('Payment failed:', error)
-      alert(`Payment failed: ${error.response?.data?.detail || error.message}`)
+      // Add error message to conversation instead of alert
+      const errorMessage = {
+        role: 'assistant',
+        content: `Payment failed: ${error.response?.data?.detail || error.message}. Please try again.`
+      }
+      const updatedMessages = [...messages, errorMessage]
+      setMessages(updatedMessages)
+      saveMessagesToDB(activeCampaignId, updatedMessages)
+      
       setShowPaymentModal(false)
     } finally {
       setIsLoading(false)
@@ -549,17 +618,22 @@ function App() {
               onSendMessage={handleSendMessage}
               textareaRef={textareaRef}
               onPay={initiatePayment}
-              isPaid={activeCampaign?.paid}
-              campaignCost={CAMPAIGN_COST}
+              campaignCost={pendingCost > 0 ? pendingCost : CAMPAIGN_COST}
+              pendingCost={pendingCost}
+              isPaymentPending={isPaymentPending}
+              isPaid={activeCampaign?.executed || activeCampaign?.paid || false}
             />
 
             <ConfirmationModal
               isOpen={showPaymentModal}
-              onClose={() => setShowPaymentModal(false)}
+              onClose={() => {
+                // Just close the modal - don't reset pending state so user can pay later
+                setShowPaymentModal(false)
+              }}
               onConfirm={processPayment}
               title="Confirm Payment"
-              message={`Are you sure you want to pay $${CAMPAIGN_COST} USDC to activate this campaign? This action cannot be undone.`}
-              confirmText={`Pay $${CAMPAIGN_COST}`}
+              message={`Are you sure you want to pay $${pendingCost > 0 ? pendingCost.toFixed(2) : CAMPAIGN_COST} USDC to execute this action? This action cannot be undone.`}
+              confirmText={`Pay $${pendingCost > 0 ? pendingCost.toFixed(2) : CAMPAIGN_COST}`}
               isLoading={isLoading}
             />
           </>

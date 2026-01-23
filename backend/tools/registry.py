@@ -143,7 +143,7 @@ def execute_apollo_search_people(
 
     return json.dumps({
         "status": "success",
-        "message": "Apollo search completed (all contacts fetched - filtering will be done separately)",
+        "message": "Apollo search completed. Contacts will be filtered based on your criteria.",
         "results": fetched_contacts,
         "count": len(fetched_contacts)
     })
@@ -392,13 +392,32 @@ def gmail_tool(action: str, params: str) -> str:
         results = []
         sent_count = 0
         
+        # Get user details for signature from params or context (OAuth user data)
+        user_name = params_dict.get('user_name')
+        user_email = params_dict.get('user_email')
+        
+        # Fallback to context if not in params
+        if not user_name or not user_email:
+            try:
+                from core.context import current_user_var
+                user_data = current_user_var.get()
+                if user_data:
+                    user_name = user_name or user_data.get('name', 'Arc Wardens Team')
+                    user_email = user_email or user_data.get('email', '')
+            except:
+                pass
+        
+        # Final fallback
+        user_name = user_name or "Arc Wardens Team"
+        user_email = user_email or ""
+        
         # Personalize emails using recipient data (even though we send to test emails)
         # Use first recipient's data for personalization, or generic if no recipients
         personalization_data = recipients[0] if recipients else {}
         
         for email in target_list:
             try:
-                # Personalize email body and subject
+                # Personalize email body and subject with recipient data
                 personalized_body = body_template
                 personalized_subject = subject
                 
@@ -413,6 +432,12 @@ def gmail_tool(action: str, params: str) -> str:
                 personalized_subject = personalized_subject.replace("{name}", name)
                 personalized_subject = personalized_subject.replace("{company}", company)
                 
+                # Add signature with user details
+                signature = f"\n\n---\n{user_name}"
+                if user_email:
+                    signature += f"\n{user_email}"
+                signature += "\nArc Wardens"
+                
                 # Add a small delay to avoid rate limits
                 import time
                 time.sleep(0.5) 
@@ -422,7 +447,7 @@ def gmail_tool(action: str, params: str) -> str:
                 if campaign_id:
                     response_link += f"&campaignId={campaign_id}"
                 
-                modified_body = personalized_body + f"\n\n---\nReply specifically to this campaign here: {response_link}"
+                modified_body = personalized_body + signature + f"\n\nReply specifically to this campaign here: {response_link}"
                 # -------------------------
 
                 logger.info(f"Sending personalized email to {email} (using data from {name} at {company})...")
@@ -539,40 +564,6 @@ def execute_gmail_send_email(
         })
 
 
-def execute_gmail_send_bulk_emails(
-    recipients: List[Dict[str, str]],
-    subject: str,
-    body_template: str,
-    is_html: bool = False,
-    delay_seconds: int = 2,
-    campaign_id: Optional[str] = None,
-    user_id: Optional[str] = None
-) -> str:
-    """Execute Gmail bulk send by calling gmail_tool with send_to_list action."""
-    logger.info(f"Gmail send_bulk_emails: recipients={len(recipients)}, subject={subject}")
-    
-    # Get access token from context
-    from core.context import current_token_var
-    access_token = current_token_var.get()
-    
-    if not access_token:
-        return json.dumps({
-            "status": "error",
-            "message": "No access token available. Please ensure you are logged in."
-        })
-    
-    # Build params for gmail_tool
-    params = {
-        "access_token": access_token,
-        "subject": subject,
-        "body": body_template,
-        "recipients": recipients,
-        "campaign_id": campaign_id,
-        "user_id": user_id
-    }
-    
-    # Call the actual gmail_tool with send_to_list action
-    return gmail_tool("send_to_list", json.dumps(params))
 
 
 def execute_gmail_create_draft(
@@ -619,19 +610,109 @@ def execute_ask_for_clarification(
 def execute_repeat_campaign_action(
     campaign_id: str,
     action_type: str,
-    modified_params: Optional[Dict[str, Any]] = None
+    modified_params: Optional[Dict[str, Any]] = None,
+    user_id: Optional[str] = None
 ) -> str:
-    """Execute repeat campaign action."""
+    """Execute repeat campaign action by replaying saved tool calls."""
     logger.info(f"Repeat campaign action: campaign_id={campaign_id}, action_type={action_type}")
     
-    # TODO: Implement actual action repetition logic
-    return json.dumps({
-        "status": "success",
-        "message": f"Repeat {action_type} - placeholder implementation",
-        "campaign_id": campaign_id,
-        "action_type": action_type,
-        "modified_params": modified_params
-    })
+    try:
+        from core.db import get_db_connection
+        import json as json_lib
+        
+        # Get campaign tool calls
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT tool_calls, contacts FROM campaigns WHERE id = ?', (campaign_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row or not row[0]:
+            return json.dumps({
+                "status": "error",
+                "message": f"No saved workflow found for campaign {campaign_id}"
+            })
+        
+        tool_calls = json_lib.loads(row[0]) if row[0] else []
+        contacts = json_lib.loads(row[1]) if row[1] else []
+        
+        if not tool_calls:
+            return json.dumps({
+                "status": "error",
+                "message": "No tool calls found in campaign workflow"
+            })
+        
+        # Filter tool calls by action_type if specified
+        if action_type:
+            # Map action_type to tool names
+            action_to_tool = {
+                "search_leads": "apollo_search_people",
+                "filter_contacts": "filter_contacts_by_company_criteria",
+                "send_emails": "gmail_tool"  # Uses gmail_tool with send_to_list action
+            }
+            target_tool = action_to_tool.get(action_type)
+            if target_tool:
+                tool_calls = [tc for tc in tool_calls if tc.get("tool_name") == target_tool]
+        
+        if not tool_calls:
+            return json.dumps({
+                "status": "error",
+                "message": f"No {action_type} actions found in campaign workflow"
+            })
+        
+        # Execute tool calls in sequence
+        results = []
+        for tool_call in tool_calls:
+            tool_name = tool_call.get("tool_name")
+            tool_args = tool_call.get("tool_args", {})
+            
+            # Apply modified params if provided
+            if modified_params:
+                tool_args.update(modified_params)
+            
+            # Ensure campaign_id and user_id are set
+            if campaign_id and "campaign_id" not in tool_args:
+                tool_args["campaign_id"] = campaign_id
+            if user_id and "user_id" not in tool_args:
+                tool_args["user_id"] = user_id
+            
+            # Execute the tool
+            executor = TOOL_EXECUTORS.get(tool_name)
+            if executor:
+                try:
+                    result = executor(**tool_args)
+                    results.append({
+                        "tool_name": tool_name,
+                        "status": "success",
+                        "result": result
+                    })
+                except Exception as e:
+                    logger.error(f"Error executing {tool_name}: {e}")
+                    results.append({
+                        "tool_name": tool_name,
+                        "status": "error",
+                        "error": str(e)
+                    })
+            else:
+                results.append({
+                    "tool_name": tool_name,
+                    "status": "error",
+                    "error": f"Tool executor not found for {tool_name}"
+                })
+        
+        return json.dumps({
+            "status": "success",
+            "message": f"Repeated {len(results)} action(s) from campaign workflow",
+            "campaign_id": campaign_id,
+            "results": results
+        })
+        
+    except Exception as e:
+        logger.error(f"Error repeating campaign action: {e}")
+        return json.dumps({
+            "status": "error",
+            "message": f"Failed to repeat campaign action: {str(e)}"
+        })
 
 
 def send_gmail(to: str, subject: str, body: str, access_token: str) -> Dict[str, Any]:
@@ -673,7 +754,6 @@ TOOL_EXECUTORS: Dict[str, Callable] = {
     "apollo_search_people": execute_apollo_search_people,
     "filter_contacts_by_company_criteria": execute_filter_contacts_by_company_criteria,
     "gmail_send_email": execute_gmail_send_email,
-    "gmail_send_bulk_emails": execute_gmail_send_bulk_emails,
     "gmail_create_draft": execute_gmail_create_draft,
     "ask_for_clarification": execute_ask_for_clarification,
     "repeat_campaign_action": execute_repeat_campaign_action,

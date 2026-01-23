@@ -163,7 +163,8 @@ class CampaignUpdateRequest(BaseModel):
     paid: Optional[bool] = None
     cost: Optional[float] = None
     status: Optional[str] = None
-    status: Optional[str] = None
+    messages: Optional[list] = None
+    pendingCost: Optional[float] = None
 
 class AuthRequest(BaseModel):
     token: str
@@ -359,8 +360,10 @@ async def campaign_chat(request: CampaignChatRequest, user: dict = Depends(get_c
             from agents import get_agent
             from core.context import current_token_var
             
-            # Set token in context for tools to use
+            # Set token and user in context for tools to use
+            from core.context import current_user_var
             token_reset = current_token_var.set(access_token)
+            user_reset = current_user_var.set(user)
             
             try:
                 agent = get_agent()
@@ -376,6 +379,7 @@ async def campaign_chat(request: CampaignChatRequest, user: dict = Depends(get_c
                 return result
             finally:
                 current_token_var.reset(token_reset)
+                current_user_var.reset(user_reset)
 
         except Exception as e:
             logger.exception("AI Agent failed")
@@ -409,12 +413,53 @@ async def campaign_pay(request: CampaignPayRequest, user: dict = Depends(get_cur
         
         if access_token:
             from tools.registry import gmail_tool
+            from core.db import get_campaign_analytics
             logger.info(f"Payment successful. Triggering email campaign {request.campaignId}")
+            
+            # Get filtered contacts from campaign
+            campaign = get_campaign_analytics(request.campaignId, user['user_id'])
+            recipients = []
+            if campaign and campaign.get('contacts'):
+                import json as json_lib
+                try:
+                    contacts_str = campaign.get('contacts')
+                    if isinstance(contacts_str, str):
+                        recipients = json_lib.loads(contacts_str)
+                    else:
+                        recipients = contacts_str
+                except:
+                    logger.warning("Could not parse campaign contacts")
+            
+            # Get email subject and body from last tool calls or use defaults
+            subject = "Quick question about your sales outreach"
+            body_template = "Hi {name},\n\nI hope this email finds you well.\n\nI'm reaching out from Arc-Wardens, an AI-powered B2B SaaS sales outreach platform designed to streamline and automate your sales processes.\n\nWould you be interested in learning more about how we can help optimize your sales outreach?\n\nBest regards"
+            
+            # Try to get from last tool calls
+            if campaign and campaign.get('tool_calls'):
+                import json as json_lib
+                try:
+                    tool_calls = json_lib.loads(campaign.get('tool_calls'))
+                    # Find last email-related tool call (could be gmail_tool or any email tool)
+                    for tool_call in reversed(tool_calls):
+                        tool_name = tool_call.get('tool_name', '')
+                        if 'gmail' in tool_name.lower() or 'email' in tool_name.lower():
+                            tool_args = tool_call.get('tool_args', {})
+                            # Check for subject and body in various formats
+                            subject = tool_args.get('subject') or tool_args.get('subject_line') or subject
+                            body_template = tool_args.get('body') or tool_args.get('body_template') or tool_args.get('body_content') or body_template
+                            break
+                except:
+                    pass
             
             params = {
                 "access_token": access_token,
                 "campaign_id": request.campaignId,
-                "user_id": user['user_id']
+                "user_id": user['user_id'],
+                "user_name": user.get('name', 'Arc Wardens Team'),
+                "user_email": user.get('email', ''),
+                "subject": subject,
+                "body": body_template,
+                "recipients": recipients
             }
             try:
                 res_str = gmail_tool("send_to_list", json.dumps(params))
@@ -498,13 +543,20 @@ async def campaign_create(request: CampaignCreateRequest, user: dict = Depends(g
 async def campaign_update(request: CampaignUpdateRequest, user: dict = Depends(get_current_user)):
     """Update a campaign in the database"""
     try:
+        # Serialize messages to JSON if provided
+        messages_json = None
+        if request.messages is not None:
+            messages_json = json.dumps(request.messages)
+        
         update_campaign(
             request.campaignId,
             user_id=user['user_id'],
             name=request.name,
             executed=request.paid,
             cost=request.cost,
-            status=request.status
+            status=request.status,
+            messages=messages_json,
+            pending_cost=request.pendingCost
         )
         return {
             'success': True,
@@ -568,4 +620,4 @@ async def health():
 if __name__ == '__main__':
     import uvicorn
     # Use reload=False when running directly, or run with: uvicorn server:app --reload
-    uvicorn.run(app, host="0.0.0.0", port=5001, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=5000, reload=False)

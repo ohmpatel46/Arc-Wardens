@@ -103,14 +103,6 @@ def build_intent_routing_guide(tool_schemas: List[Dict[str, Any]], categories: D
                 '"Search for people at AI startups" → `apollo_search_people` then `filter_contacts_by_company_criteria`'
             ]
         },
-        "email_operations": {
-            "keywords": ["email", "send", "message", "reach out", "contact", "draft", "outreach", "campaign email"],
-            "examples": [
-                '"Send an email to John" → `gmail_send_email`',
-                '"Send campaign emails to all leads" → `gmail_send_bulk_emails`',
-                '"Create a draft for review" → `gmail_create_draft`'
-            ]
-        }
     }
     
     routing.append("## Intent Routing Guide\n")

@@ -120,6 +120,19 @@ class CampaignAgent:
             
             logger.info(f"Processing message with {len(messages)} total messages for campaign {campaign_id}")
             
+            # Track tool calls for campaign state
+            tool_calls_history = []
+            total_cost = 0.0
+            
+            # Tool cost mapping (in USDC)
+            TOOL_COSTS = {
+                "apollo_search_people": 0.1,
+                "filter_contacts_by_company_criteria": 0.05,
+                "gmail_tool": 0.2,  # For send_to_list action
+                "ask_for_clarification": 0.0,  # No cost
+                "repeat_campaign_action": 0.0  # Cost depends on repeated action
+            }
+            
             # Agentic loop - call LLM, execute tools, repeat until done
             for iteration in range(self.max_iterations):
                 logger.info(f"Agent iteration {iteration + 1}/{self.max_iterations}")
@@ -132,10 +145,49 @@ class CampaignAgent:
                     # No tool calls - return the response
                     response_text = self._extract_text_content(response.content)
                     logger.info(f"Agent completed with response: {response_text[:100]}...")
+                    
+                    # Add cost message if there's a cost
+                    if total_cost > 0:
+                        response_text += f"\n\n**This action will cost {total_cost:.2f} USDC. Would you like to continue?**"
+                    
+                    # Save tool calls to campaign state
+                    if campaign_id and tool_calls_history:
+                        try:
+                            from core.db import get_db_connection
+                            import json as json_lib
+                            conn = get_db_connection()
+                            cursor = conn.cursor()
+                            
+                            # Get existing tool calls
+                            cursor.execute('SELECT tool_calls FROM campaigns WHERE id = ?', (campaign_id,))
+                            row = cursor.fetchone()
+                            existing_calls = []
+                            if row and row[0]:
+                                try:
+                                    existing_calls = json_lib.loads(row[0])
+                                except:
+                                    existing_calls = []
+                            
+                            # Append new tool calls
+                            existing_calls.extend(tool_calls_history)
+                            
+                            # Save updated tool calls
+                            cursor.execute(
+                                'UPDATE campaigns SET tool_calls = ? WHERE id = ?',
+                                (json_lib.dumps(existing_calls), campaign_id)
+                            )
+                            conn.commit()
+                            conn.close()
+                            logger.info(f"Saved {len(tool_calls_history)} tool calls to campaign {campaign_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to save tool calls: {e}")
+                    
                     return {
                         "success": True,
                         "message": response_text,
-                        "response": response_text
+                        "response": response_text,
+                        "cost": total_cost,
+                        "tool_calls": tool_calls_history
                     }
                 
                 # Process tool calls
@@ -154,6 +206,19 @@ class CampaignAgent:
                     
                     logger.info(f"Executing tool: {tool_name} with args: {json.dumps(tool_args, indent=2)[:200]}")
                     
+                    # Track tool call for campaign state
+                    tool_call_record = {
+                        "tool_name": tool_name,
+                        "tool_args": tool_args,
+                        "iteration": iteration + 1
+                    }
+                    tool_calls_history.append(tool_call_record)
+                    
+                    # Calculate cost (exclude ask_for_clarification)
+                    if tool_name != "ask_for_clarification":
+                        tool_cost = TOOL_COSTS.get(tool_name, 0.1)  # Default 0.1 USDC
+                        total_cost += tool_cost
+                    
                     # Find and execute the tool
                     tool_result = self._execute_tool(tool_name, tool_args)
                     
@@ -168,10 +233,38 @@ class CampaignAgent:
             
             # If we've exhausted iterations
             logger.warning(f"Agent reached max iterations ({self.max_iterations})")
+            
+            # Save tool calls even if max iterations reached
+            if campaign_id and tool_calls_history:
+                try:
+                    from core.db import get_db_connection
+                    import json as json_lib
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    cursor.execute('SELECT tool_calls FROM campaigns WHERE id = ?', (campaign_id,))
+                    row = cursor.fetchone()
+                    existing_calls = []
+                    if row and row[0]:
+                        try:
+                            existing_calls = json_lib.loads(row[0])
+                        except:
+                            existing_calls = []
+                    existing_calls.extend(tool_calls_history)
+                    cursor.execute(
+                        'UPDATE campaigns SET tool_calls = ? WHERE id = ?',
+                        (json_lib.dumps(existing_calls), campaign_id)
+                    )
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    logger.error(f"Failed to save tool calls: {e}")
+            
             return {
                 "success": True,
                 "message": "I've processed your request. Let me know if you need anything else.",
-                "response": "I've processed your request. Let me know if you need anything else."
+                "response": "I've processed your request. Let me know if you need anything else.",
+                "cost": total_cost,
+                "tool_calls": tool_calls_history
             }
             
         except Exception as e:

@@ -60,135 +60,6 @@ APOLLO_SEARCH_PEOPLE = {
 
 
 # =============================================================================
-# Gmail Tools - Email Operations
-# =============================================================================
-
-GMAIL_SEND_EMAIL = {
-    "name": "gmail_send_email",
-    "description": "Send a single email via Gmail. Use for individual outreach, follow-ups, or one-off communications. Email is sent immediately upon execution.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "to": {
-                "type": "string",
-                "description": "Recipient email address (or comma-separated list for multiple recipients)"
-            },
-            "subject": {
-                "type": "string",
-                "description": "Email subject line"
-            },
-            "body": {
-                "type": "string",
-                "description": "Email body content (plain text or HTML)"
-            },
-            "cc": {
-                "type": "string",
-                "description": "CC recipients (comma-separated email addresses)"
-            },
-            "bcc": {
-                "type": "string",
-                "description": "BCC recipients (comma-separated email addresses)"
-            },
-            "is_html": {
-                "type": "boolean",
-                "default": False,
-                "description": "Whether the body content is HTML (default: false for plain text)"
-            }
-        },
-        "required": ["to", "subject", "body"]
-    },
-    "sideEffects": "SENDS EMAIL IMMEDIATELY. Cannot be undone. Confirm with user before executing.",
-    "category": "email_operations",
-    "costInfo": "Subject to Gmail sending limits"
-}
-
-GMAIL_SEND_BULK_EMAILS = {
-    "name": "gmail_send_bulk_emails",
-    "description": "Send bulk emails to multiple recipients using a template. Use for campaign outreach to a list of contacts. Supports personalization placeholders like {name}, {company}.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "recipients": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "email": {"type": "string"},
-                        "name": {"type": "string"},
-                        "company": {"type": "string"}
-                    },
-                    "required": ["email"]
-                },
-                "description": "List of recipient objects with email and optional personalization fields"
-            },
-            "subject": {
-                "type": "string",
-                "description": "Email subject line (can include {name}, {company} placeholders)"
-            },
-            "body_template": {
-                "type": "string",
-                "description": "Email body template with placeholders like {name}, {company} for personalization"
-            },
-            "is_html": {
-                "type": "boolean",
-                "default": False,
-                "description": "Whether the body template is HTML"
-            },
-            "delay_seconds": {
-                "type": "integer",
-                "default": 2,
-                "minimum": 1,
-                "maximum": 60,
-                "description": "Delay between emails in seconds to avoid rate limits (default: 2)"
-            }
-        },
-        "required": ["recipients", "subject", "body_template"]
-    },
-    "sideEffects": "SENDS MULTIPLE EMAILS. Cannot be undone. Always confirm recipient count and preview content with user first.",
-    "category": "email_operations",
-    "costInfo": "Subject to Gmail sending limits (500/day for regular, 2000/day for Workspace)"
-}
-
-GMAIL_CREATE_DRAFT = {
-    "name": "gmail_create_draft",
-    "description": "Create an email draft in Gmail without sending it. Use when user wants to prepare an email for review before sending, or save a template.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "to": {
-                "type": "string",
-                "description": "Recipient email address"
-            },
-            "subject": {
-                "type": "string",
-                "description": "Email subject line"
-            },
-            "body": {
-                "type": "string",
-                "description": "Email body content"
-            },
-            "cc": {
-                "type": "string",
-                "description": "CC recipients (comma-separated)"
-            },
-            "bcc": {
-                "type": "string",
-                "description": "BCC recipients (comma-separated)"
-            },
-            "is_html": {
-                "type": "boolean",
-                "default": False,
-                "description": "Whether the body content is HTML"
-            }
-        },
-        "required": ["to", "subject", "body"]
-    },
-    "sideEffects": "Creates a draft in Gmail. Does NOT send the email.",
-    "category": "email_operations",
-    "costInfo": "No cost"
-}
-
-# =============================================================================
 # Utility Tools
 # =============================================================================
 
@@ -285,10 +156,6 @@ ALL_TOOL_SCHEMAS: List[Dict[str, Any]] = [
     # Lead Generation
     APOLLO_SEARCH_PEOPLE,
     FILTER_CONTACTS_BY_COMPANY_CRITERIA,
-    # Email Operations
-    GMAIL_SEND_EMAIL,
-    GMAIL_SEND_BULK_EMAILS,
-    GMAIL_CREATE_DRAFT,
     # Utility
     ASK_FOR_CLARIFICATION,
     REPEAT_CAMPAIGN_ACTION,
@@ -300,11 +167,6 @@ TOOL_CATEGORIES = {
         "display_name": "Lead Generation & Search",
         "description": "Find and filter contacts",
         "tools": ["apollo_search_people", "filter_contacts_by_company_criteria"]
-    },
-    "email_operations": {
-        "display_name": "Email Operations (Gmail)",
-        "description": "Send emails and manage drafts",
-        "tools": ["gmail_send_email", "gmail_send_bulk_emails", "gmail_create_draft"]
     },
     "utility": {
         "display_name": "Utility",
