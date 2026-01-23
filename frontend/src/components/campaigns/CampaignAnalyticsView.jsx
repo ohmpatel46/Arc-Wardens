@@ -165,7 +165,48 @@ export default function CampaignAnalyticsView() {
         </div>
 
         {/* Content Body */}
-        <div className="flex-1 overflow-auto p-6 md:p-8">
+        <div className="flex-1 overflow-auto p-6 md:p-8 space-y-6">
+
+          {/* Replied Contacts Summary */}
+          {replies.length > 0 && (
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-2xl p-6 shadow-lg">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z" />
+                    <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767c.28.149.599.233.938.233h2l3 3v-3h2a2 2 0 002-2V9a2 2 0 00-2-2h-1z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">🎉 {replies.length} {replies.length === 1 ? 'Reply' : 'Replies'} Received!</h3>
+                  <p className="text-sm text-gray-600">Contacts who have responded to your campaign</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {replies.map((reply, idx) => (
+                  <div key={idx} className="bg-white rounded-xl p-4 shadow-sm border border-green-100 hover:shadow-md transition-shadow">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                        {reply.email.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-900 truncate">{reply.email}</p>
+                        <p className="text-xs text-gray-500 truncate mt-1">{reply.subject || 'No subject'}</p>
+                        <p className="text-xs text-gray-400 mt-1">{reply.snippet?.substring(0, 60)}...</p>
+                        <div className="mt-2">
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                            ✓ Replied
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <CampaignAnalytics
             campaign={selectedCampaign}
             replies={replies}
