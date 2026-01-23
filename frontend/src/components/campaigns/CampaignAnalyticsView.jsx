@@ -182,6 +182,7 @@ export default function CampaignAnalyticsView() {
               <CampaignAnalytics
                 campaign={selectedCampaign}
                 replies={replies}
+                userEmail={user?.email}
               />
             </div>
           </div>

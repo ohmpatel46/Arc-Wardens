@@ -90,6 +90,7 @@ def execute_apollo_search_people(
             # Currently we are using a simple default search, but we could use the params
             data = {
                 "sort_ascending": False,
+                "per_page": 100,
                 "q_organization_domains": query if query else None
             }
             

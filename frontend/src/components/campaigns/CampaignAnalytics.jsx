@@ -27,7 +27,7 @@ const getMockData = (email) => {
   }
 }
 
-export default function CampaignAnalytics({ campaign, replies = [] }) {
+export default function CampaignAnalytics({ campaign, replies = [], userEmail }) {
   const [expandedEmail, setExpandedEmail] = useState(null)
 
   const recipients = useMemo(() => {
@@ -180,7 +180,10 @@ export default function CampaignAnalytics({ campaign, replies = [] }) {
                                 </div>
 
                                 <div className="flex flex-col gap-3 pt-6 shrink-0">
-                                  <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition-all hover:shadow-md active:scale-95">
+                                  <button
+                                    onClick={() => window.open(`https://mail.google.com/mail/?authuser=${encodeURIComponent(userEmail || '')}#search/from%3A${encodeURIComponent(contact.email)}`, '_blank')}
+                                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition-all hover:shadow-md active:scale-95"
+                                  >
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
                                     Reply Back
                                   </button>
