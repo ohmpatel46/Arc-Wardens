@@ -60,7 +60,7 @@ export default function CampaignAnalytics({ campaign, replies = [], userEmail })
       }
     })
 
-    return list
+    return list.filter(c => c.email && c.email.trim() !== '')
   }, [campaign])
 
   const getReply = (email) => {
