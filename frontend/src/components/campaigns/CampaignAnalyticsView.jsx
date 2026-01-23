@@ -44,7 +44,8 @@ export default function CampaignAnalyticsView() {
       const response = await axios.get(`${API_BASE}/campaigns`)
       if (response.data.success) {
         const allCampaigns = response.data.campaigns || []
-        const paidCampaigns = allCampaigns.filter(c => c.paid)
+        // Filter campaigns that have been paid (executed) - check both flags for compatibility
+        const paidCampaigns = allCampaigns.filter(c => c.paid || c.executed)
         setCampaigns(paidCampaigns)
 
         if (paidCampaigns.length > 0) {

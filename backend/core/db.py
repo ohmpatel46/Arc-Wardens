@@ -70,6 +70,12 @@ def init_db():
     except sqlite3.OperationalError:
         pass
     
+    # Add pending_action column to campaigns for pre-payment tool execution
+    try:
+        cursor.execute('ALTER TABLE campaigns ADD COLUMN pending_action TEXT')
+    except sqlite3.OperationalError:
+        pass
+    
     # Create analytics table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS analytics (

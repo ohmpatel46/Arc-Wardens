@@ -124,14 +124,15 @@ class CampaignAgent:
             tool_calls_history = []
             total_cost = 0.0
             
-            # Tool cost mapping (in USDC)
-            TOOL_COSTS = {
-                "apollo_search_people": 0.1,
-                "filter_contacts_by_company_criteria": 0.05,
-                "gmail_tool": 0.2,  # For send_to_list action
-                "ask_for_clarification": 0.0,  # No cost
-                "repeat_campaign_action": 0.0  # Cost depends on repeated action
+            # Tool cost mapping (in USDC) - only major tools require payment
+            # Prices are 10x base rate. Search includes filtering (grouped payment)
+            PAID_TOOLS = {
+                "apollo_search_people": 1.0,  # Includes filtering - one payment for lead generation
+                "gmail_tool": 2.0,  # For sending emails
             }
+            
+            # Free tools (no payment required) - filter is free since it's part of search workflow
+            FREE_TOOLS = ["ask_for_clarification", "repeat_campaign_action", "filter_contacts_by_company_criteria"]
             
             # Agentic loop - call LLM, execute tools, repeat until done
             for iteration in range(self.max_iterations):
@@ -146,47 +147,15 @@ class CampaignAgent:
                     response_text = self._extract_text_content(response.content)
                     logger.info(f"Agent completed with response: {response_text[:100]}...")
                     
-                    # Add cost message if there's a cost
-                    if total_cost > 0:
-                        response_text += f"\n\n**This action will cost {total_cost:.2f} USDC. Would you like to continue?**"
-                    
                     # Save tool calls to campaign state
                     if campaign_id and tool_calls_history:
-                        try:
-                            from core.db import get_db_connection
-                            import json as json_lib
-                            conn = get_db_connection()
-                            cursor = conn.cursor()
-                            
-                            # Get existing tool calls
-                            cursor.execute('SELECT tool_calls FROM campaigns WHERE id = ?', (campaign_id,))
-                            row = cursor.fetchone()
-                            existing_calls = []
-                            if row and row[0]:
-                                try:
-                                    existing_calls = json_lib.loads(row[0])
-                                except:
-                                    existing_calls = []
-                            
-                            # Append new tool calls
-                            existing_calls.extend(tool_calls_history)
-                            
-                            # Save updated tool calls
-                            cursor.execute(
-                                'UPDATE campaigns SET tool_calls = ? WHERE id = ?',
-                                (json_lib.dumps(existing_calls), campaign_id)
-                            )
-                            conn.commit()
-                            conn.close()
-                            logger.info(f"Saved {len(tool_calls_history)} tool calls to campaign {campaign_id}")
-                        except Exception as e:
-                            logger.error(f"Failed to save tool calls: {e}")
+                        self._save_tool_calls(campaign_id, tool_calls_history)
                     
                     return {
                         "success": True,
                         "message": response_text,
                         "response": response_text,
-                        "cost": total_cost,
+                        "cost": 0,  # No cost for non-tool responses
                         "tool_calls": tool_calls_history
                     }
                 
@@ -204,20 +173,47 @@ class CampaignAgent:
                     if user_id and "user_id" not in tool_args:
                         tool_args["user_id"] = user_id
                     
-                    logger.info(f"Executing tool: {tool_name} with args: {json.dumps(tool_args, indent=2)[:200]}")
+                    logger.info(f"Tool requested: {tool_name} with args: {json.dumps(tool_args, indent=2)[:200]}")
                     
-                    # Track tool call for campaign state
+                    # Check if this is a PAID tool - require payment BEFORE execution
+                    if tool_name in PAID_TOOLS:
+                        tool_cost = PAID_TOOLS[tool_name]
+                        
+                        # Save pending action to campaign for later execution
+                        pending_action = {
+                            "tool_name": tool_name,
+                            "tool_args": tool_args,
+                            "tool_id": tool_id,
+                            "cost": tool_cost
+                        }
+                        self._save_pending_action(campaign_id, pending_action)
+                        
+                        # Generate a user-friendly description
+                        action_descriptions = {
+                            "apollo_search_people": "search and filter leads",
+                            "gmail_tool": "send emails"
+                        }
+                        action_desc = action_descriptions.get(tool_name, f"execute {tool_name}")
+                        
+                        logger.info(f"Payment required for {tool_name}: {tool_cost} USDC")
+                        
+                        return {
+                            "success": True,
+                            "message": f"Ready to {action_desc}. Payment of {tool_cost:.2f} USDC required to proceed.",
+                            "response": f"Ready to {action_desc}. Payment of {tool_cost:.2f} USDC required to proceed.",
+                            "cost": tool_cost,
+                            "pending_action": pending_action,
+                            "requires_payment": True,
+                            "tool_calls": tool_calls_history
+                        }
+                    
+                    # Free tool - execute immediately
                     tool_call_record = {
                         "tool_name": tool_name,
                         "tool_args": tool_args,
                         "iteration": iteration + 1
                     }
                     tool_calls_history.append(tool_call_record)
-                    
-                    # Calculate cost (exclude ask_for_clarification)
-                    if tool_name != "ask_for_clarification":
-                        tool_cost = TOOL_COSTS.get(tool_name, 0.1)  # Default 0.1 USDC
-                        total_cost += tool_cost
                     
                     # Find and execute the tool
                     tool_result = self._execute_tool(tool_name, tool_args)
@@ -236,34 +232,13 @@ class CampaignAgent:
             
             # Save tool calls even if max iterations reached
             if campaign_id and tool_calls_history:
-                try:
-                    from core.db import get_db_connection
-                    import json as json_lib
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT tool_calls FROM campaigns WHERE id = ?', (campaign_id,))
-                    row = cursor.fetchone()
-                    existing_calls = []
-                    if row and row[0]:
-                        try:
-                            existing_calls = json_lib.loads(row[0])
-                        except:
-                            existing_calls = []
-                    existing_calls.extend(tool_calls_history)
-                    cursor.execute(
-                        'UPDATE campaigns SET tool_calls = ? WHERE id = ?',
-                        (json_lib.dumps(existing_calls), campaign_id)
-                    )
-                    conn.commit()
-                    conn.close()
-                except Exception as e:
-                    logger.error(f"Failed to save tool calls: {e}")
+                self._save_tool_calls(campaign_id, tool_calls_history)
             
             return {
                 "success": True,
                 "message": "I've processed your request. Let me know if you need anything else.",
                 "response": "I've processed your request. Let me know if you need anything else.",
-                "cost": total_cost,
+                "cost": 0,
                 "tool_calls": tool_calls_history
             }
             
@@ -321,6 +296,251 @@ class CampaignAgent:
                 "status": "error",
                 "message": f"Error executing {tool_name}: {str(e)}"
             })
+    
+    def _save_tool_calls(self, campaign_id: str, tool_calls_history: List[Dict]) -> None:
+        """Save tool calls to campaign state."""
+        try:
+            from core.db import get_db_connection
+            import json as json_lib
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Get existing tool calls
+            cursor.execute('SELECT tool_calls FROM campaigns WHERE id = ?', (campaign_id,))
+            row = cursor.fetchone()
+            existing_calls = []
+            if row and row[0]:
+                try:
+                    existing_calls = json_lib.loads(row[0])
+                except:
+                    existing_calls = []
+            
+            # Append new tool calls
+            existing_calls.extend(tool_calls_history)
+            
+            # Save updated tool calls
+            cursor.execute(
+                'UPDATE campaigns SET tool_calls = ? WHERE id = ?',
+                (json_lib.dumps(existing_calls), campaign_id)
+            )
+            conn.commit()
+            conn.close()
+            logger.info(f"Saved {len(tool_calls_history)} tool calls to campaign {campaign_id}")
+        except Exception as e:
+            logger.error(f"Failed to save tool calls: {e}")
+    
+    def _save_pending_action(self, campaign_id: str, pending_action: Dict) -> None:
+        """Save pending action that requires payment before execution."""
+        try:
+            from core.db import get_db_connection
+            import json as json_lib
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                'UPDATE campaigns SET pending_action = ? WHERE id = ?',
+                (json_lib.dumps(pending_action), campaign_id)
+            )
+            conn.commit()
+            conn.close()
+            logger.info(f"Saved pending action {pending_action['tool_name']} to campaign {campaign_id}")
+        except Exception as e:
+            logger.error(f"Failed to save pending action: {e}")
+    
+    def execute_pending_action(self, campaign_id: str, user_id: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
+        """
+        Execute a pending action after payment has been processed.
+        Then CONTINUE the agent loop to process subsequent steps (like filtering).
+        """
+        try:
+            from core.db import get_db_connection
+            import json as json_lib
+            from langchain_core.messages import ToolMessage
+            
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Get pending action
+            cursor.execute('SELECT pending_action FROM campaigns WHERE id = ?', (campaign_id,))
+            row = cursor.fetchone()
+            
+            if not row or not row[0]:
+                return {
+                    "success": False,
+                    "message": "No pending action found for this campaign.",
+                    "error": "No pending action"
+                }
+            
+            pending_action = json_lib.loads(row[0])
+            tool_name = pending_action.get("tool_name")
+            tool_args = pending_action.get("tool_args", {})
+            tool_id = pending_action.get("tool_id", tool_name)
+            
+            # Inject campaign/user context
+            tool_args["campaign_id"] = campaign_id
+            tool_args["user_id"] = user_id
+            
+            logger.info(f"Executing pending action: {tool_name}")
+            
+            # Execute the tool
+            tool_result = self._execute_tool(tool_name, tool_args)
+            
+            # Clear pending action
+            cursor.execute(
+                'UPDATE campaigns SET pending_action = NULL WHERE id = ?',
+                (campaign_id,)
+            )
+            conn.commit()
+            conn.close()
+            
+            # Save to tool calls history
+            tool_call_record = {
+                "tool_name": tool_name,
+                "tool_args": tool_args,
+                "paid": True
+            }
+            self._save_tool_calls(campaign_id, [tool_call_record])
+            
+            logger.info(f"Tool {tool_name} executed. Now continuing agent loop...")
+            
+            # --- CONTINUE THE AGENT LOOP ---
+            # Build messages with conversation history + tool result
+            campaign_context = f"\n\nCURRENT CAMPAIGN CONTEXT:\n- Campaign ID: {campaign_id}\n- User ID: {user_id}\nAll filtered contacts and emails should be automatically associated with this campaign. Do NOT ask the user for campaign ID."
+            
+            messages = [SystemMessage(content=self.system_prompt + campaign_context)]
+            
+            # Add conversation history
+            if conversation_history:
+                for msg in conversation_history:
+                    role = msg.get("role", "")
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        text_parts = [p.get('text', '') for p in content if isinstance(p, dict) and 'text' in p]
+                        content = '\n'.join(text_parts) if text_parts else str(content)
+                    elif not isinstance(content, str):
+                        content = str(content)
+                    
+                    if role == "user":
+                        messages.append(HumanMessage(content=content))
+                    elif role == "assistant":
+                        messages.append(AIMessage(content=content))
+            
+            # Add the tool result as if the LLM had called the tool
+            # We need to simulate the tool call response structure
+            messages.append(AIMessage(
+                content="",
+                tool_calls=[{"name": tool_name, "args": tool_args, "id": tool_id}]
+            ))
+            messages.append(ToolMessage(content=str(tool_result), tool_call_id=tool_id))
+            
+            # Track tool calls and costs for continuation
+            tool_calls_history = [tool_call_record]
+            total_cost = 0.0
+            
+            # Prices are 10x base rate. Search includes filtering (grouped payment)
+            PAID_TOOLS = {
+                "apollo_search_people": 1.0,  # Includes filtering
+                "gmail_tool": 2.0,  # For sending emails
+            }
+            # Filter is FREE - part of search workflow
+            FREE_TOOLS = ["filter_contacts_by_company_criteria"]
+            
+            # Continue the agent loop
+            for iteration in range(self.max_iterations):
+                logger.info(f"Post-payment iteration {iteration + 1}/{self.max_iterations}")
+                
+                response = self.llm_with_tools.invoke(messages)
+                
+                # Check if there are more tool calls
+                if not response.tool_calls:
+                    # No more tool calls - return final response
+                    response_text = self._extract_text_content(response.content)
+                    logger.info(f"Agent completed post-payment with: {response_text[:100]}...")
+                    
+                    if tool_calls_history:
+                        self._save_tool_calls(campaign_id, tool_calls_history[1:])  # Don't double-save first tool
+                    
+                    return {
+                        "success": True,
+                        "message": response_text,
+                        "response": response_text,
+                        "tool_name": tool_name,
+                        "cost": total_cost
+                    }
+                
+                # Process additional tool calls
+                messages.append(response)
+                
+                for tc in response.tool_calls:
+                    tc_name = tc["name"]
+                    tc_args = tc["args"]
+                    tc_id = tc.get("id", tc_name)
+                    
+                    # Inject context
+                    if "campaign_id" not in tc_args:
+                        tc_args["campaign_id"] = campaign_id
+                    if "user_id" not in tc_args:
+                        tc_args["user_id"] = user_id
+                    
+                    logger.info(f"Post-payment executing: {tc_name}")
+                    
+                    # Check if this is a paid tool
+                    if tc_name in PAID_TOOLS:
+                        tool_cost = PAID_TOOLS[tc_name]
+                        
+                        # Save as new pending action and request payment
+                        new_pending = {
+                            "tool_name": tc_name,
+                            "tool_args": tc_args,
+                            "tool_id": tc_id,
+                            "cost": tool_cost
+                        }
+                        self._save_pending_action(campaign_id, new_pending)
+                        
+                        action_descriptions = {
+                            "apollo_search_people": "search and filter leads",
+                            "gmail_tool": "send emails"
+                        }
+                        action_desc = action_descriptions.get(tc_name, f"execute {tc_name}")
+                        
+                        return {
+                            "success": True,
+                            "message": f"Ready to {action_desc}. Payment of {tool_cost:.2f} USDC required to proceed.",
+                            "response": f"Ready to {action_desc}. Payment of {tool_cost:.2f} USDC required to proceed.",
+                            "cost": tool_cost,
+                            "pending_action": new_pending,
+                            "requires_payment": True,
+                            "tool_name": tool_name
+                        }
+                    
+                    # Free tool - execute immediately
+                    tc_record = {
+                        "tool_name": tc_name,
+                        "tool_args": tc_args,
+                        "iteration": iteration + 1
+                    }
+                    tool_calls_history.append(tc_record)
+                    
+                    tc_result = self._execute_tool(tc_name, tc_args)
+                    messages.append(ToolMessage(content=str(tc_result), tool_call_id=tc_id))
+                    
+                    logger.info(f"Tool {tc_name} result: {str(tc_result)[:200]}...")
+            
+            # Max iterations reached
+            return {
+                "success": True,
+                "message": "Processing complete.",
+                "response": "Processing complete.",
+                "tool_name": tool_name
+            }
+            
+        except Exception as e:
+            logger.exception(f"Error executing pending action: {e}")
+            return {
+                "success": False,
+                "message": f"Error executing action: {str(e)}",
+                "error": str(e)
+            }
     
     def get_available_tools(self) -> List[str]:
         """Get list of available tool names."""

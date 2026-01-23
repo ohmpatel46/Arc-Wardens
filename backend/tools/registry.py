@@ -421,22 +421,25 @@ def gmail_tool(action: str, params: str) -> str:
                 personalized_body = body_template
                 personalized_subject = subject
                 
-                # Replace placeholders with actual data from recipients
-                name = personalization_data.get("name", "")
-                company = personalization_data.get("organization_name", "")
-                title = personalization_data.get("title", "")
+                # Extract recipient data from various possible field names
+                name = (personalization_data.get("name") or 
+                        personalization_data.get("first_name", "") + " " + personalization_data.get("last_name", "")).strip()
+                company = (personalization_data.get("organization_name") or 
+                          personalization_data.get("company") or 
+                          personalization_data.get("organization", {}).get("name", "") or "")
+                title = personalization_data.get("title", "") or personalization_data.get("position", "")
                 
-                personalized_body = personalized_body.replace("{name}", name)
-                personalized_body = personalized_body.replace("{company}", company)
-                personalized_body = personalized_body.replace("{title}", title)
-                personalized_subject = personalized_subject.replace("{name}", name)
-                personalized_subject = personalized_subject.replace("{company}", company)
+                # Replace both {placeholder} and {{placeholder}} formats
+                for placeholder, value in [("name", name), ("company", company), ("title", title)]:
+                    personalized_body = personalized_body.replace(f"{{{{{placeholder}}}}}", value)  # {{placeholder}}
+                    personalized_body = personalized_body.replace(f"{{{placeholder}}}", value)      # {placeholder}
+                    personalized_subject = personalized_subject.replace(f"{{{{{placeholder}}}}}", value)
+                    personalized_subject = personalized_subject.replace(f"{{{placeholder}}}", value)
                 
-                # Add signature with user details
-                signature = f"\n\n---\n{user_name}"
+                # Add signature with OAuth user details (sender info)
+                signature = f"\n\nBest regards,\n{user_name}"
                 if user_email:
                     signature += f"\n{user_email}"
-                signature += "\nArc Wardens"
                 
                 # Add a small delay to avoid rate limits
                 import time
@@ -747,12 +750,73 @@ def send_gmail(to: str, subject: str, body: str, access_token: str) -> Dict[str,
 
 
 # =============================================================================
+# Gmail Tool Executor Wrapper
+# =============================================================================
+
+def execute_gmail_tool(
+    action: str,
+    subject: str = "",
+    body: str = "",
+    recipients: List[Dict] = None,
+    campaign_id: str = None,
+    user_id: str = None,
+    **kwargs
+) -> str:
+    """
+    Executor wrapper for gmail_tool that matches the schema interface.
+    Converts schema-style parameters to the gmail_tool function's expected format.
+    """
+    from core.context import current_token_var, current_user_var
+    
+    # Get access token from context
+    access_token = current_token_var.get()
+    user = current_user_var.get() or {}
+    
+    # If no recipients provided, try to get filtered contacts from campaign
+    if (not recipients or len(recipients) == 0) and campaign_id:
+        try:
+            from core.db import get_db_connection
+            import json as json_lib
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT contacts FROM campaigns WHERE id = ?', (campaign_id,))
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row and row[0]:
+                contacts_data = json_lib.loads(row[0]) if isinstance(row[0], str) else row[0]
+                if contacts_data:
+                    recipients = contacts_data
+                    logger.info(f"Loaded {len(recipients)} recipients from campaign {campaign_id}")
+        except Exception as e:
+            logger.error(f"Error loading recipients from campaign: {e}")
+    
+    # Build params dict
+    params = {
+        "access_token": access_token,
+        "subject": subject,
+        "body": body,
+        "recipients": recipients or [],
+        "campaign_id": campaign_id,
+        "user_id": user_id,
+        "user_name": user.get('name', 'Arc Wardens Team'),
+        "user_email": user.get('email', '')
+    }
+    
+    logger.info(f"Executing gmail_tool with action={action}, subject={subject[:50] if subject else 'no subject'}...")
+    
+    # Call the original gmail_tool function
+    return gmail_tool(action, json.dumps(params))
+
+
+# =============================================================================
 # Tool Function Registry
 # =============================================================================
 
 TOOL_EXECUTORS: Dict[str, Callable] = {
     "apollo_search_people": execute_apollo_search_people,
     "filter_contacts_by_company_criteria": execute_filter_contacts_by_company_criteria,
+    "gmail_tool": execute_gmail_tool,
     "gmail_send_email": execute_gmail_send_email,
     "gmail_create_draft": execute_gmail_create_draft,
     "ask_for_clarification": execute_ask_for_clarification,

@@ -396,103 +396,98 @@ async def campaign_chat(request: CampaignChatRequest, user: dict = Depends(get_c
 
 @app.post("/api/campaign/pay")
 async def campaign_pay(request: CampaignPayRequest, user: dict = Depends(get_current_user)):
-    """Process campaign payment and update database"""
+    """Process campaign payment and execute pending action, then continue agent workflow"""
     try:
-        # Update campaign as paid in database
-        update_campaign(
-            request.campaignId,
-            user_id=user['user_id'],
-            executed=True,
-            cost=request.amount,
-            status='active'
-        )
+        logger.info(f"Processing payment of {request.amount} USDC for campaign {request.campaignId}")
         
-        # --- TRIGGER EMAIL SENDING ON PAYMENT ---
+        # Get the agent to execute pending action
+        from agents import get_agent
+        from core.context import current_token_var, current_user_var
+        
         access_token = user.get('access_token')
-        emails_sent = 0
         
-        if access_token:
-            from tools.registry import gmail_tool
-            from core.db import get_campaign_analytics
-            logger.info(f"Payment successful. Triggering email campaign {request.campaignId}")
-            
-            # Get filtered contacts from campaign
-            campaign = get_campaign_analytics(request.campaignId, user['user_id'])
-            recipients = []
-            if campaign and campaign.get('contacts'):
-                import json as json_lib
-                try:
-                    contacts_str = campaign.get('contacts')
-                    if isinstance(contacts_str, str):
-                        recipients = json_lib.loads(contacts_str)
-                    else:
-                        recipients = contacts_str
-                except:
-                    logger.warning("Could not parse campaign contacts")
-            
-            # Get email subject and body from last tool calls or use defaults
-            subject = "Quick question about your sales outreach"
-            body_template = "Hi {name},\n\nI hope this email finds you well.\n\nI'm reaching out from Arc-Wardens, an AI-powered B2B SaaS sales outreach platform designed to streamline and automate your sales processes.\n\nWould you be interested in learning more about how we can help optimize your sales outreach?\n\nBest regards"
-            
-            # Try to get from last tool calls
-            if campaign and campaign.get('tool_calls'):
-                import json as json_lib
-                try:
-                    tool_calls = json_lib.loads(campaign.get('tool_calls'))
-                    # Find last email-related tool call (could be gmail_tool or any email tool)
-                    for tool_call in reversed(tool_calls):
-                        tool_name = tool_call.get('tool_name', '')
-                        if 'gmail' in tool_name.lower() or 'email' in tool_name.lower():
-                            tool_args = tool_call.get('tool_args', {})
-                            # Check for subject and body in various formats
-                            subject = tool_args.get('subject') or tool_args.get('subject_line') or subject
-                            body_template = tool_args.get('body') or tool_args.get('body_template') or tool_args.get('body_content') or body_template
-                            break
-                except:
-                    pass
-            
-            params = {
-                "access_token": access_token,
-                "campaign_id": request.campaignId,
-                "user_id": user['user_id'],
-                "user_name": user.get('name', 'Arc Wardens Team'),
-                "user_email": user.get('email', ''),
-                "subject": subject,
-                "body": body_template,
-                "recipients": recipients
-            }
+        # Get conversation history from campaign
+        campaign = get_campaign_analytics(request.campaignId, user['user_id'])
+        conversation_history = []
+        if campaign and campaign.get('messages'):
             try:
-                res_str = gmail_tool("send_to_list", json.dumps(params))
-                res = json.loads(res_str)
-                
-                # Parse results for analytics
-                if res.get("status") == "success":
-                    # Count successful results
-                    results = res.get("results", [])
-                    emails_sent = sum(1 for r in results if r.get("result", {}).get("status") == "success")
-                
-                logger.info(f"Campaign triggered. Sent {emails_sent} emails.")
-                
-            except Exception as e:
-                logger.error(f"Failed to trigger emails after payment: {e}")
-        else:
-            logger.warning("No access_token found during payment. Cannot trigger emails.")
-
-        # Update real analytics
-        create_or_update_analytics(
-             request.campaignId,
-             emails_sent=emails_sent,
-             emails_opened=0,
-             replies=0,
-             bounce_rate=0.0
-        )
+                msgs = campaign.get('messages')
+                if isinstance(msgs, str):
+                    conversation_history = json.loads(msgs)
+                else:
+                    conversation_history = msgs
+            except:
+                pass
         
-        return {
-            'success': True,
-            'message': f'Payment processed and campaign launched! Sent {emails_sent} emails.',
-            'amount': request.amount,
-            'transactionId': f'tx_{request.campaignId}_{int(time.time())}'
-        }
+        # Set context for tool execution
+        token_reset = current_token_var.set(access_token)
+        user_reset = current_user_var.set(user)
+        
+        try:
+            agent = get_agent()
+            
+            # Execute the pending action and CONTINUE the workflow
+            result = agent.execute_pending_action(
+                campaign_id=request.campaignId,
+                user_id=user['user_id'],
+                conversation_history=conversation_history
+            )
+            
+            if result.get('success'):
+                # Update campaign as paid/executed and add cost
+                update_campaign(
+                    request.campaignId,
+                    user_id=user['user_id'],
+                    executed=True,  # Mark as paid for analytics
+                    cost=request.amount
+                )
+                
+                # Check if there's another payment required (e.g., filter after search)
+                if result.get('requires_payment'):
+                    return {
+                        'success': True,
+                        'message': result.get('message'),
+                        'response': result.get('response'),
+                        'cost': result.get('cost', 0),
+                        'requires_payment': True,
+                        'amount': request.amount,
+                        'transactionId': f'tx_{request.campaignId}_{int(time.time())}'
+                    }
+                
+                # If this was an email action, update analytics
+                if result.get('tool_name') == 'gmail_tool':
+                    try:
+                        response_data = json.loads(result.get('response', '{}'))
+                        if response_data.get('status') == 'success':
+                            results = response_data.get('results', [])
+                            emails_sent = sum(1 for r in results if r.get('result', {}).get('status') == 'success')
+                            create_or_update_analytics(
+                                request.campaignId,
+                                emails_sent=emails_sent,
+                                emails_opened=0,
+                                replies=0,
+                                bounce_rate=0.0
+                            )
+                    except:
+                        pass
+                
+                return {
+                    'success': True,
+                    'message': result.get('message', 'Payment processed and action completed.'),
+                    'response': result.get('response'),
+                    'amount': request.amount,
+                    'transactionId': f'tx_{request.campaignId}_{int(time.time())}'
+                }
+            else:
+                return {
+                    'success': False,
+                    'message': result.get('message', 'Failed to execute action.'),
+                    'error': result.get('error')
+                }
+        finally:
+            current_token_var.reset(token_reset)
+            current_user_var.reset(user_reset)
+            
     except Exception as e:
         logger.exception(f"Error processing payment: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

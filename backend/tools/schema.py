@@ -149,6 +149,50 @@ FILTER_CONTACTS_BY_COMPANY_CRITERIA = {
 }
 
 # =============================================================================
+# Gmail Tool - Email Sending
+# =============================================================================
+
+GMAIL_TOOL = {
+    "name": "gmail_tool",
+    "description": "Send emails to filtered contacts. Use when the user confirms they want to send emails after reviewing a draft. The email will be personalized with recipient's name and company. In testing mode, emails are only sent to test addresses.",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["send_to_list"],
+                "description": "Action to perform. Use 'send_to_list' to send emails to the filtered contacts."
+            },
+            "subject": {
+                "type": "string",
+                "description": "Email subject line. Can include {name} and {company} placeholders for personalization."
+            },
+            "body": {
+                "type": "string",
+                "description": "Email body content. Can include {name}, {company}, and {title} placeholders for personalization."
+            },
+            "recipients": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "List of recipient contacts with their details (name, email, company, title). Usually from filtered contacts."
+            },
+            "campaign_id": {
+                "type": "string",
+                "description": "Campaign ID to associate emails with"
+            },
+            "user_id": {
+                "type": "string",
+                "description": "User ID for authentication"
+            }
+        },
+        "required": ["action", "subject", "body"]
+    },
+    "sideEffects": "SENDS REAL EMAILS. In testing mode, only sends to test addresses. Requires user confirmation before use.",
+    "category": "email_operations",
+    "costInfo": "Gmail API usage, potential rate limits"
+}
+
+# =============================================================================
 # Tool Registry - All tools organized by category
 # =============================================================================
 
@@ -156,6 +200,8 @@ ALL_TOOL_SCHEMAS: List[Dict[str, Any]] = [
     # Lead Generation
     APOLLO_SEARCH_PEOPLE,
     FILTER_CONTACTS_BY_COMPANY_CRITERIA,
+    # Email Operations
+    GMAIL_TOOL,
     # Utility
     ASK_FOR_CLARIFICATION,
     REPEAT_CAMPAIGN_ACTION,
@@ -167,6 +213,11 @@ TOOL_CATEGORIES = {
         "display_name": "Lead Generation & Search",
         "description": "Find and filter contacts",
         "tools": ["apollo_search_people", "filter_contacts_by_company_criteria"]
+    },
+    "email_operations": {
+        "display_name": "Email Operations",
+        "description": "Send and manage email campaigns",
+        "tools": ["gmail_tool"]
     },
     "utility": {
         "display_name": "Utility",

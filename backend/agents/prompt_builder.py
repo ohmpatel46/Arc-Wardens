@@ -103,6 +103,14 @@ def build_intent_routing_guide(tool_schemas: List[Dict[str, Any]], categories: D
                 '"Search for people at AI startups" → `apollo_search_people` then `filter_contacts_by_company_criteria`'
             ]
         },
+        "email_operations": {
+            "keywords": ["send", "email", "send it", "looks good", "send the email", "send emails", "yes send", "confirm send"],
+            "examples": [
+                '"Send it" → `gmail_tool` with action "send_to_list" (use filtered contacts and drafted email)',
+                '"Yes, send the emails" → `gmail_tool` with action "send_to_list"',
+                '"Looks good, send it" → `gmail_tool` with action "send_to_list"'
+            ]
+        },
     }
     
     routing.append("## Intent Routing Guide\n")
@@ -160,21 +168,24 @@ Common workflows that chain multiple tools:
 **Email Draft Workflow:**
 - When user wants to send emails, IMMEDIATELY draft an email based on context (what they told you about their product/service)
 - Do NOT ask for subject/body separately - be proactive and create a draft based on the conversation
-- Show subject and body with placeholders like {{name}}, {{company}}, {{title}}
-- Example draft format:
+- **IMPORTANT: Use ACTUAL recipient data from filtered contacts - NOT placeholders!**
+- If you have filtered contacts, use the first recipient's name and company in the draft
+- Example: If the contact is "Meet Bhalodiya" at "Goldman Sachs", show:
   ---
-  **Subject:** {{name}}, quick question about {{company}}
+  **Subject:** Meet, quick question about Goldman Sachs
   
   **Body:**
-  Hi {{name}},
+  Hi Meet,
   
   [Your drafted message here based on what user told you about their product]
   
-  Best regards
+  Best regards,
+  [User's name from OAuth will be added automatically]
   ---
 - Ask "Does this look good, or would you like me to adjust anything?"
 - Iterate based on feedback until user confirms
-- THEN call the email tool - campaign_id and user_id are AUTOMATICALLY provided, do NOT ask for them
+- THEN call the gmail_tool with action "send_to_list" - campaign_id and user_id are AUTOMATICALLY provided
+- Note: When sending to multiple recipients, the system will automatically personalize each email with that recipient's details
 
 ### 4. Error Handling
 - If a tool returns an error, explain it clearly to the user
