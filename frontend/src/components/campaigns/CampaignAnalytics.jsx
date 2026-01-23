@@ -30,6 +30,11 @@ const getMockData = (email) => {
 export default function CampaignAnalytics({ campaign, replies = [], userEmail }) {
   const [expandedEmail, setExpandedEmail] = useState(null)
 
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [roleFilter, setRoleFilter] = useState('')
+  const [locationFilter, setLocationFilter] = useState('')
+
   const recipients = useMemo(() => {
     let list = []
 
@@ -68,6 +73,32 @@ export default function CampaignAnalytics({ campaign, replies = [], userEmail })
     return replies.find(r => r.email && r.email.toLowerCase() === email.toLowerCase());
   }
 
+  const filteredRecipients = useMemo(() => {
+    return recipients.filter(contact => {
+      // Search Filter
+      const searchLower = search.toLowerCase()
+      const matchesSearch = !search ||
+        (contact.name?.toLowerCase().includes(searchLower)) ||
+        (contact.email?.toLowerCase().includes(searchLower)) ||
+        (contact.organization_name?.toLowerCase().includes(searchLower))
+
+      // Status Filter
+      const hasReply = !!getReply(contact.email)
+      const matchesStatus = statusFilter === 'all' ||
+        (statusFilter === 'replied' && hasReply) ||
+        (statusFilter === 'sent' && !hasReply)
+
+      // Role Filter
+      const matchesRole = !roleFilter || contact.title?.toLowerCase().includes(roleFilter.toLowerCase())
+
+      // Location Filter
+      const locationString = `${contact.city || ''} ${contact.country || ''}`.toLowerCase()
+      const matchesLocation = !locationFilter || locationString.includes(locationFilter.toLowerCase())
+
+      return matchesSearch && matchesStatus && matchesRole && matchesLocation
+    })
+  }, [recipients, search, statusFilter, roleFilter, locationFilter, replies])
+
   const toggleExpand = (email) => {
     if (expandedEmail === email) {
       setExpandedEmail(null);
@@ -95,27 +126,78 @@ export default function CampaignAnalytics({ campaign, replies = [], userEmail })
 
   return (
     <div className="flex flex-col h-full overflow-hidden relative">
-      <div className="flex-1 overflow-auto bg-white border border-gray-200 rounded-xl shadow-sm ring-1 ring-black/5">
-        <div className="overflow-x-auto">
+      <div className="flex-1 overflow-hidden bg-white border border-gray-200 rounded-xl shadow-sm ring-1 ring-black/5 flex flex-col">
+        {/* Filters Toolbar */}
+        <div className="p-4 border-b border-gray-200 bg-gray-50 flex flex-wrap items-center gap-4">
+          <div className="relative flex-1 min-w-[200px]">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+            <input
+              type="text"
+              placeholder="Search name, email, company..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-shadow"
+            />
+          </div>
+
+          <div className="relative">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="appearance-none block w-40 pl-3 pr-10 py-2 border border-gray-300 rounded-lg leading-5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-shadow"
+            >
+              <option value="all">All Status</option>
+              <option value="sent">Sent</option>
+              <option value="replied">Replied</option>
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </div>
+
+          <input
+            type="text"
+            placeholder="Filter by Role"
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+            className="block w-40 pl-3 pr-3 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          />
+
+          <input
+            type="text"
+            placeholder="Filter by Location"
+            value={locationFilter}
+            onChange={(e) => setLocationFilter(e.target.value)}
+            className="block w-40 pl-3 pr-3 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          />
+        </div>
+
+        <div className="overflow-auto flex-1">
           <table className="min-w-full divide-y divide-gray-200 text-left">
             <thead className="bg-gray-50/80 backdrop-blur-sm sticky top-0 z-10">
               <tr>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider font-[Inter]">Recipient</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider font-[Inter]">Status</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider font-[Inter]">Role</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider font-[Inter]">Location</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider font-[Inter]">Action</th>
+                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Recipient</th>
+                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Role</th>
+                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Location</th>
+                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Action</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {recipients.length === 0 ? (
+              {filteredRecipients.length === 0 ? (
                 <tr>
                   <td colSpan="5" className="px-6 py-12 text-center text-gray-500">
                     <p className="text-base font-medium text-gray-900">No recipients found</p>
                   </td>
                 </tr>
               ) : (
-                recipients.map((contact, idx) => {
+                filteredRecipients.map((contact, idx) => {
                   const reply = getReply(contact.email);
                   const isExpanded = expandedEmail === contact.email;
 
@@ -160,7 +242,7 @@ export default function CampaignAnalytics({ campaign, replies = [], userEmail })
 
                       {/* Expanded Response Row */}
                       {isExpanded && reply && (
-                        <tr key={`${idx}-detail`} className="bg-blue-50/30 animate-in fade-in slide-in-from-top-2 duration-200">
+                        <tr key={`${idx}-detail`} className="bg-blue-50/30 duration-200">
                           <td colSpan="5" className="px-0 py-0 border-b border-blue-100">
                             <div className="p-6 pl-20 pr-12 relative overflow-hidden">
                               <div className="absolute left-10 top-6 bottom-6 w-0.5 bg-blue-200 rounded-full"></div>
@@ -171,7 +253,7 @@ export default function CampaignAnalytics({ campaign, replies = [], userEmail })
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
                                     Internal Response
                                   </h4>
-                                  <div className="bg-white p-5 rounded-xl border border-blue-100 shadow-sm text-gray-800 text-sm leading-relaxed whitespace-pre-wrap font-[Inter]">
+                                  <div className="bg-white p-5 rounded-xl border border-blue-100 shadow-sm text-gray-800 text-sm leading-relaxed whitespace-pre-wrap">
                                     {reply.response}
                                   </div>
                                   <div className="mt-2 text-xs text-gray-400 flex items-center gap-2">
@@ -206,9 +288,9 @@ export default function CampaignAnalytics({ campaign, replies = [], userEmail })
             </tbody>
           </table>
         </div>
-        {recipients.length > 0 && (
+        {(recipients.length > 0 || filteredRecipients.length > 0) && (
           <div className="bg-gray-50 px-6 py-3 border-t border-gray-200">
-            <p className="text-xs text-gray-500 text-center">Showing {recipients.length} recipients. Click on rows with 'Replied' status to view user responses.</p>
+            <p className="text-xs text-gray-500 text-center">Showing {filteredRecipients.length} recipients. Click on rows with 'Replied' status to view user responses.</p>
           </div>
         )}
       </div>
