@@ -1,0 +1,43 @@
+{
+    "name": "arc-wardens",
+    "version": 2,
+    "builds": [
+        {
+            "src": "backend/server.py",
+            "use": "@vercel/python",
+            "config": {
+                "maxDuration": 10
+            }
+        },
+        {
+            "src": "frontend/package.json",
+            "use": "@vercel/static-build",
+            "config": {
+                "distDir": "dist"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "src": "/api/(.*)",
+            "dest": "/backend/server.py"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/frontend/$1",
+            "headers": {
+                "cache-control": "s-maxage=0"
+            }
+        },
+        {
+            "handle": "filesystem"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/frontend/index.html"
+        }
+    ],
+    "env": {
+        "PYTHON_VERSION": "3.9"
+    }
+}
