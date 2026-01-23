@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: arc-wardens-backend
+    env: docker
+    root: backend
+    plan: free
+    startCommand: uvicorn server:app --host 0.0.0.0 --port 5000
+    envVars:
+      - fromGroup: arc-wardens-env
+      - key: PORT
+        value: 5000
