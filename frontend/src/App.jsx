@@ -9,17 +9,9 @@ import LoadingSpinner from './components/shared/LoadingSpinner'
 import ConfirmationModal from './components/shared/ConfirmationModal'
 import { useAuth } from './context/AuthContext'
 import Login from './components/auth/Login'
+import { DEFAULT_ANALYTICS, CAMPAIGN_COST } from './constants'
 
 const API_BASE = '/api'
-
-export const DEFAULT_ANALYTICS = {
-  emailsSent: 1250,
-  emailsOpened: 342,
-  replies: 28,
-  bounceRate: 2.4
-}
-
-export const CAMPAIGN_COST = 0.1
 
 function App() {
   const { user, logout, loading: authLoading } = useAuth()
@@ -480,28 +472,30 @@ function App() {
       />
 
       <div className="flex-1 flex flex-col relative">
-        {/* Wallet Balance Widget */}
-        <div className="absolute top-4 right-4 z-50">
-          <div className="bg-white/90 backdrop-blur-md shadow-lg border border-gray-200 rounded-xl px-4 py-2 flex items-center gap-3 transition-all hover:shadow-xl hover:scale-105">
-            <div className="flex flex-col items-end">
-              <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">Balance</span>
-              <span className="text-gray-900 font-bold font-mono">
-                {walletBalance?.rawData?.data?.tokenBalances?.[0]?.amount
-                  ? `$${parseFloat(walletBalance.rawData.data.tokenBalances[0].amount).toFixed(0.1)}`
-                  : walletBalance?.usdcBalance?.amount
-                    ? `$${parseFloat(walletBalance.usdcBalance.amount).toFixed(0.1)}`
-                    : walletBalance ? '$0.00' : '...'}
-                <span className="text-xs text-gray-500 ml-1">USDC</span>
-              </span>
-            </div>
-            <div className="h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
-                <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd" />
-              </svg>
+        {/* Wallet Balance Widget - Hidden on Analytics View */}
+        {!showAnalytics && (
+          <div className="absolute top-4 right-4 z-50">
+            <div className="bg-white/90 backdrop-blur-md shadow-lg border border-gray-200 rounded-xl px-4 py-2 flex items-center gap-3 transition-all hover:shadow-xl hover:scale-105">
+              <div className="flex flex-col items-end">
+                <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">Balance</span>
+                <span className="text-gray-900 font-bold font-mono">
+                  {walletBalance?.rawData?.data?.tokenBalances?.[0]?.amount
+                    ? `$${parseFloat(walletBalance.rawData.data.tokenBalances[0].amount).toFixed(0.1)}`
+                    : walletBalance?.usdcBalance?.amount
+                      ? `$${parseFloat(walletBalance.usdcBalance.amount).toFixed(0.1)}`
+                      : walletBalance ? '$0.00' : '...'}
+                  <span className="text-xs text-gray-500 ml-1">USDC</span>
+                </span>
+              </div>
+              <div className="h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+                  <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd" />
+                </svg>
+              </div>
             </div>
           </div>
-        </div>
+        )}
         {showAnalytics ? (
           <CampaignAnalyticsView />
         ) : showWallet ? (
