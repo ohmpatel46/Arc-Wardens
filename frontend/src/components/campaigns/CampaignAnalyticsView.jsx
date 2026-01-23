@@ -7,115 +7,6 @@ import { useAuth } from '../../context/AuthContext'
 
 const API_BASE = '/api'
 
-// --- Helpers ---
-const timeAgo = (dateStr) => {
-  if (!dateStr) return '';
-  const date = new Date(dateStr);
-  const now = new Date();
-  const seconds = Math.floor((now - date) / 1000);
-
-  let interval = seconds / 31536000;
-  if (interval > 1) return Math.floor(interval) + "y ago";
-  interval = seconds / 2592000;
-  if (interval > 1) return Math.floor(interval) + "mo ago";
-  interval = seconds / 86400;
-  if (interval > 1) return Math.floor(interval) + "d ago";
-  interval = seconds / 3600;
-  if (interval > 1) return Math.floor(interval) + "h ago";
-  interval = seconds / 60;
-  if (interval > 1) return Math.floor(interval) + "m ago";
-  return "just now";
-}
-
-const ReplyModal = ({ reply, onClose }) => {
-  if (!reply) return null;
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-md transition-all duration-300" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
-        <div className="bg-gray-50/50 border-b border-gray-100 p-6 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-sm">
-              {reply.email?.charAt(0).toUpperCase()}
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-gray-900">{reply.email}</h3>
-              <p className="text-sm text-gray-500 flex items-center gap-2">
-                {timeAgo(reply.receivedAt)}
-                <span className="w-1 h-1 rounded-full bg-gray-300"></span>
-                Via Email Campaign
-              </p>
-            </div>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-        <div className="p-8 max-h-[60vh] overflow-y-auto custom-scrollbar">
-          <div className="prose prose-blue max-w-none">
-            <p className="text-gray-800 text-lg leading-relaxed whitespace-pre-wrap font-[Inter]">
-              {reply.response}
-            </p>
-          </div>
-        </div>
-        <div className="bg-gray-50 p-4 flex justify-end gap-3 border-t border-gray-100">
-          <button className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white hover:shadow-sm rounded-lg transition-all border border-transparent hover:border-gray-200" onClick={onClose}>
-            Close
-          </button>
-          <button className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 shadow-sm rounded-lg transition-all hover:shadow-md flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
-            Reply Back
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const ReplyCard = ({ reply, onClick }) => {
-  // Smart truncation logic
-  const isLong = reply.response.length > 180;
-  const previewText = isLong ? reply.response.substring(0, 180) + "..." : reply.response;
-
-  return (
-    <div
-      onClick={() => onClick(reply)}
-      className="group bg-white rounded-2xl border border-gray-100 p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer relative overflow-hidden h-full flex flex-col"
-    >
-      <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-blue-400 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-
-      <div className="flex justify-between items-start mb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-bold text-xs group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
-            {reply.email?.charAt(0).toUpperCase()}
-          </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-semibold text-gray-900 leading-none">{reply.email.split('@')[0]}</span>
-            <span className="text-[10px] text-gray-400 mt-1">{timeAgo(reply.receivedAt)}</span>
-          </div>
-        </div>
-      </div>
-
-      <p className="text-gray-600 text-sm leading-relaxed font-[Inter]">
-        {previewText}
-      </p>
-
-      <div className="mt-4 flex items-center justify-between">
-        <span className="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-medium bg-green-50 text-green-700 border border-green-100">
-          Reply
-        </span>
-
-        {isLong && (
-          <span className="text-xs font-medium text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-            Read full
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
 export default function CampaignAnalyticsView() {
   const { user } = useAuth()
   const [campaigns, setCampaigns] = useState([])
@@ -128,11 +19,6 @@ export default function CampaignAnalyticsView() {
   const [checkingStatus, setCheckingStatus] = useState(false)
   const [replies, setReplies] = useState([])
 
-  // UI State for Replies
-  const [replySearch, setReplySearch] = useState('')
-  const [selectedReply, setSelectedReply] = useState(null)
-  const [visibleRepliesCount, setVisibleRepliesCount] = useState(6)
-
   useEffect(() => {
     fetchCampaigns()
   }, [])
@@ -141,8 +27,6 @@ export default function CampaignAnalyticsView() {
     if (selectedCampaignId) {
       fetchCampaignAnalytics(selectedCampaignId)
       setReplies([])
-      setReplySearch('')
-      setVisibleRepliesCount(6)
     } else {
       setSelectedCampaign(null)
     }
@@ -220,18 +104,6 @@ export default function CampaignAnalyticsView() {
     }
   }
 
-  // Filter and pagination logic
-  const filteredReplies = useMemo(() => {
-    if (!replySearch) return replies;
-    return replies.filter(r =>
-      r.email?.toLowerCase().includes(replySearch.toLowerCase()) ||
-      r.response?.toLowerCase().includes(replySearch.toLowerCase())
-    );
-  }, [replies, replySearch]);
-
-  const visibleReplies = filteredReplies.slice(0, visibleRepliesCount);
-  const hasMore = visibleRepliesCount < filteredReplies.length;
-
   if (selectedCampaign && !isLoading) {
     return (
       <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden">
@@ -294,65 +166,6 @@ export default function CampaignAnalyticsView() {
 
         {/* Content Body */}
         <div className="flex-1 overflow-auto p-6 md:p-8 space-y-8">
-
-          {/* New Customer Responses Section */}
-          {replies.length > 0 && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-bold text-gray-900 tracking-tight">Customer Responses</h3>
-                  <p className="text-sm text-gray-500">Real-time feedback from your campaign recipients</p>
-                </div>
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Search replies..."
-                    value={replySearch}
-                    onChange={(e) => setReplySearch(e.target.value)}
-                    className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64 bg-white shadow-sm"
-                  />
-                  <svg className="w-4 h-4 text-gray-400 absolute left-3 top-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </div>
-              </div>
-
-              {/* Smart Grid - Adapts to content quantity */}
-              <div className={`grid gap-6 ${visibleReplies.length === 1 ? 'grid-cols-1 max-w-3xl mx-auto' :
-                visibleReplies.length === 2 ? 'grid-cols-1 md:grid-cols-2' :
-                  'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
-                }`}>
-                {visibleReplies.map((reply, idx) => (
-                  <div key={idx} className="h-full">
-                    <ReplyCard reply={reply} onClick={setSelectedReply} />
-                  </div>
-                ))}
-              </div>
-
-              {/* Load More / Empty State */}
-              {hasMore && (
-                <div className="flex justify-center pt-8 pb-4">
-                  <button
-                    onClick={() => setVisibleRepliesCount(prev => prev + 6)}
-                    className="px-8 py-3 bg-white border border-gray-200 shadow-sm rounded-full text-sm font-semibold text-gray-700 hover:text-gray-900 hover:shadow-md hover:border-gray-300 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-                  >
-                    Load More Responses
-                  </button>
-                </div>
-              )}
-
-              {filteredReplies.length === 0 && (
-                <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-gray-200">
-                  <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                  </div>
-                  <p className="text-gray-900 font-medium">No replies found matching "{replySearch}"</p>
-                  <button onClick={() => setReplySearch('')} className="text-blue-600 hover:text-blue-700 text-sm font-medium mt-2">Clear search</button>
-                </div>
-              )}
-            </div>
-          )}
-
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col min-h-[600px]">
             <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between">
               <div>
@@ -373,9 +186,6 @@ export default function CampaignAnalyticsView() {
             </div>
           </div>
         </div>
-
-        {/* Detail Modal */}
-        {selectedReply && <ReplyModal reply={selectedReply} onClose={() => setSelectedReply(null)} />}
       </div>
     )
   }
