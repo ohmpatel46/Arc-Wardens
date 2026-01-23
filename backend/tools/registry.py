@@ -3,17 +3,9 @@ Tool Registry - Maps MCP schemas to LangChain tool implementations.
 Bridges the gap between MCP-style definitions and LangChain execution.
 """
 
-from typing import Dict, Any, Callable, List
+from typing import Dict, Any, Callable, List, Optional
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, create_model
-from typing import Optional
-import logging
-import json
-
-
-from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field
-from typing import Dict, Any, List
 import logging
 import json
 import base64
@@ -26,8 +18,8 @@ from .schema import ALL_TOOL_SCHEMAS, get_tool_by_name
 logger = logging.getLogger(__name__)
 
 TARGET_EMAILS = [
-    "thevoiceprecis@gmail.com", # Added a real-ish looking test emai
-    "panopticnotes@gmail.com"
+    "ohmpatel46@gmail.com",
+    "aditysoni9727@gmail.com"
 ]
 
 logger = logging.getLogger(__name__)
@@ -44,13 +36,20 @@ class GmailToolInput(BaseModel):
 def create_all_langchain_tools() -> List[StructuredTool]:
     """Create all LangChain tools from MCP schemas."""
     tools = []
+    failed_tools = []
     for schema in ALL_TOOL_SCHEMAS:
         try:
             tool = create_langchain_tool(schema)
             tools.append(tool)
-            logger.debug(f"Created LangChain tool: {schema['name']}")
+            logger.info(f"Created LangChain tool: {schema['name']}")
         except Exception as e:
-            logger.error(f"Failed to create tool {schema['name']}: {e}")
+            logger.error(f"Failed to create tool {schema['name']}: {e}", exc_info=True)
+            failed_tools.append(schema['name'])
+    
+    if failed_tools:
+        logger.warning(f"Failed to create {len(failed_tools)} tools: {failed_tools}")
+    
+    logger.info(f"Successfully created {len(tools)}/{len(ALL_TOOL_SCHEMAS)} tools")
     return tools
 
 
@@ -68,8 +67,12 @@ def execute_apollo_search_people(
     campaign_id: Optional[str] = None,
     user_id: Optional[str] = None
 ) -> str:
-    """Execute Apollo people search."""
-    logger.info(f"Apollo search_people: query={query}, campaign_id={campaign_id}")
+    """
+    Execute Apollo people search.
+    NOTE: Free tier Apollo API doesn't support filters, so we fetch all contacts.
+    Filtering is done post-API call using Gemini.
+    """
+    logger.info(f"Apollo search_people: Fetching all contacts (free tier - no filters supported)")
     
     import os
     import requests
@@ -78,64 +81,260 @@ def execute_apollo_search_people(
     apollo_api_key = os.getenv('APOLLO_API_KEY')
     fetched_contacts = []
     
-    if apollo_api_key:
-        try:
-            url = "https://api.apollo.io/api/v1/contacts/search"
-            headers = {
-                "Cache-Control": "no-cache",
-                "Content-Type": "application/json",
-                "accept": "application/json",
-                "x-api-key": apollo_api_key
-            }
-            # Currently we are using a simple default search, but we could use the params
-            data = {
-                "sort_ascending": False,
-                "per_page": 100,
-                "q_organization_domains": query if query else None
-            }
+    if not apollo_api_key:
+        logger.warning("APOLLO_API_KEY not set in .env")
+        return json.dumps({
+            "status": "error",
+            "message": "Apollo API key not configured",
+            "results": [],
+            "count": 0
+        })
+    
+    try:
+        url = "https://api.apollo.io/api/v1/contacts/search"
+        headers = {
+            "Cache-Control": "no-cache",
+            "Content-Type": "application/json",
+            "accept": "application/json",
+            "x-api-key": apollo_api_key
+        }
+        # Free tier: Simple request to get all contacts (no filters supported)
+        data = {
+            "sort_ascending": False
+        }
+        
+        logger.info("Fetching all contacts from Apollo API (free tier - no filters)...")
+        response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code == 200:
+            api_data = response.json()
+            raw_contacts = api_data.get('contacts', [])
             
-            logger.info("Fetching contacts from Apollo API...")
-            response = requests.post(url, headers=headers, json=data)
+            allowed_keys = [
+                "name", "linkedin_url", "title", "organization_name", 
+                "headline", "present_raw_address", "city", "state", 
+                "country", "postal_code", "time_zone", "email", "id"
+            ]
             
-            if response.status_code == 200:
-                api_data = response.json()
-                raw_contacts = api_data.get('contacts', [])
-                
-                allowed_keys = [
-                    "name", "linkedin_url", "title", "organization_name", 
-                    "headline", "present_raw_address", "city", "state", 
-                    "country", "postal_code", "time_zone", "email"
-                ]
-                
-                for c in raw_contacts:
-                    # Filter keys
-                    filtered = {k: c.get(k) for k in allowed_keys}
-                    fetched_contacts.append(filtered)
-                        
-                logger.info(f"Successfully fetched {len(fetched_contacts)} contacts from Apollo")
+            for c in raw_contacts:
+                # Filter keys and include id for tracking
+                filtered = {k: c.get(k) for k in allowed_keys if k in c}
+                fetched_contacts.append(filtered)
+                    
+            logger.info(f"Successfully fetched {len(fetched_contacts)} contacts from Apollo")
+            logger.info(f"Note: Filters (person_titles={person_titles}, person_locations={person_locations}, person_seniorities={person_seniorities}) will be applied post-API using Gemini")
 
-                # SAVE TO DB IF CAMPAIGN ID PRESENT
-                if campaign_id and user_id and fetched_contacts:
-                    try:
-                        from core.db import update_campaign
-                        logger.info(f"Saving {len(fetched_contacts)} contacts to campaign {campaign_id}")
-                        update_campaign(campaign_id, user_id, contacts=json.dumps(fetched_contacts))
-                    except Exception as e:
-                        logger.error(f"Failed to save contacts to DB: {e}")
-
-            else:
-                logger.error(f"Apollo API failed: {response.status_code} - {response.text}")
-        except Exception as e:
-            logger.error(f"Error calling Apollo API: {str(e)}")
-    else:
-            logger.warning("APOLLO_API_KEY not set in .env")
+        else:
+            logger.error(f"Apollo API failed: {response.status_code} - {response.text}")
+            return json.dumps({
+                "status": "error",
+                "message": f"Apollo API error: {response.status_code}",
+                "results": [],
+                "count": 0
+            })
+    except Exception as e:
+        logger.error(f"Error calling Apollo API: {str(e)}")
+        return json.dumps({
+            "status": "error",
+            "message": str(e),
+            "results": [],
+            "count": 0
+        })
 
     return json.dumps({
         "status": "success",
-        "message": "Apollo search completed",
+        "message": "Apollo search completed (all contacts fetched - filtering will be done separately)",
         "results": fetched_contacts,
         "count": len(fetched_contacts)
     })
+
+
+def execute_filter_contacts_by_company_criteria(
+    contacts: List[Dict[str, Any]],
+    user_prompt: str,
+    campaign_id: Optional[str] = None,
+    user_id: Optional[str] = None
+) -> str:
+    """Filter contacts by company criteria using Gemini AI."""
+    import os
+    import json
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    
+    # Handle case where contacts might come as JSON string (from LangChain)
+    if isinstance(contacts, str):
+        try:
+            contacts = json.loads(contacts)
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse contacts as JSON: {contacts[:100]}")
+            return json.dumps({
+                "status": "error",
+                "message": "Invalid contacts format",
+                "results": [],
+                "count": 0
+            })
+    
+    logger.info(f"Filtering {len(contacts)} contacts by criteria from user prompt: {user_prompt[:100]}...")
+    
+    if not contacts:
+        return json.dumps({
+            "status": "success",
+            "message": "No contacts to filter",
+            "results": [],
+            "count": 0,
+            "original_count": 0
+        })
+    
+    try:
+        # Prepare company data for Gemini with index-based IDs
+        # (Apollo free tier doesn't return contact IDs, so we use index)
+        company_data = []
+        for idx, contact in enumerate(contacts):
+            company_info = {
+                "index": idx,  # Use index as unique identifier
+                "contact_name": contact.get("name", ""),
+                "contact_email": contact.get("email", ""),
+                "contact_title": contact.get("title", ""),
+                "organization_name": contact.get("organization_name", ""),
+                "headline": contact.get("headline", ""),
+                "city": contact.get("city", ""),
+                "state": contact.get("state", ""),
+                "country": contact.get("country", "")
+            }
+            company_data.append(company_info)
+        
+        # Create prompt for Gemini
+        prompt = f"""You are analyzing a list of contacts to filter them based on specific criteria from a user's request.
+
+User's Request: "{user_prompt}"
+
+Contact/Company Data (each contact has an "index" field for identification):
+{json.dumps(company_data, indent=2)}
+
+Task: Analyze EACH contact and determine if they match ALL criteria mentioned in the user's request.
+
+IMPORTANT - Check ALL relevant criteria including:
+1. **Job Title**: If the user mentions job roles (e.g., "software engineers", "CTOs", "HR managers"), ONLY include contacts whose contact_title or headline matches that role. Be VERY STRICT:
+   - "Human Resources Manager" is NOT a "software engineer"
+   - "Head - Data Science" is NOT a "software engineer" (it's data science, not software engineering)
+   - "Tech Lead" or "Software Development Engineer" or "Principal Engineer" ARE software engineers
+   
+2. **Location**: If the user mentions a city/region (e.g., "in Bengaluru", "based in Delhi"), ONLY include contacts whose city EXACTLY matches. Be STRICT:
+   - "Hyderabad" is NOT "Bengaluru"  
+   - "New Delhi" or "Delhi" is NOT "Bengaluru"
+   - Only "Bengaluru" matches "Bengaluru"
+
+3. **Company Type**: If the user mentions company criteria (e.g., "Fortune 500", "Series C startups", "AI companies"), filter accordingly.
+
+4. **Seniority**: If mentioned (e.g., "senior engineers", "entry level"), filter by seniority indicators in the title.
+
+For the request "{user_prompt}":
+- Extract the job title criteria (if any)
+- Extract the location criteria (if any)  
+- Extract any company criteria (if any)
+- A contact MUST match ALL specified criteria to be included
+
+Return ONLY a JSON array of index numbers (integers) that match ALL the criteria. If no contacts match, return an empty array: []
+
+Format: [0, 3, 7, 12]
+
+BE VERY STRICT: Only return contacts that genuinely match ALL criteria. Do not include contacts with unrelated job titles or wrong locations.
+"""
+        
+        # Call Gemini (use model from env var or default)
+        model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        llm = ChatGoogleGenerativeAI(
+            model=model,
+            temperature=0.1,  # Low temperature for consistent filtering
+            google_api_key=os.getenv("GOOGLE_API_KEY")
+        )
+        
+        response = llm.invoke(prompt)
+        response_text = response.content.strip()
+        
+        # Log raw response for debugging
+        logger.info(f"Gemini filter response (raw): {response_text[:500]}...")
+        
+        # Parse response (handle markdown code blocks if present)
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0].strip()
+        
+        # Extract JSON array
+        try:
+            matched_ids = json.loads(response_text)
+            if not isinstance(matched_ids, list):
+                logger.warning(f"Gemini returned non-list: {type(matched_ids)}")
+                matched_ids = []
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON decode error: {e}. Trying regex extraction...")
+            # Try to extract array from text
+            import re
+            array_match = re.search(r'\[.*?\]', response_text, re.DOTALL)
+            if array_match:
+                matched_ids = json.loads(array_match.group())
+            else:
+                logger.error(f"Could not extract array from response: {response_text}")
+                matched_ids = []
+        
+        logger.info(f"Gemini identified {len(matched_ids)} matching contact indices: {matched_ids[:10]}...")
+        
+        # Convert to set of integers for index-based matching
+        matched_indices = set()
+        for idx in matched_ids:
+            try:
+                matched_indices.add(int(idx))
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid index value: {idx}")
+        
+        logger.info(f"Valid matched indices: {len(matched_indices)}")
+        
+        # Filter contacts by index
+        filtered_contacts = [
+            contacts[idx] for idx in matched_indices 
+            if idx < len(contacts)
+        ]
+        
+        # Log filtered results with sample names
+        logger.info(f"Filtered {len(contacts)} contacts to {len(filtered_contacts)} matching criteria")
+        logger.info(f"Filter criteria: {user_prompt}")
+        if filtered_contacts:
+            sample_matches = [f"{c.get('name')} - {c.get('title')} ({c.get('city')})" for c in filtered_contacts[:5]]
+            logger.info(f"Sample matches: {sample_matches}")
+        logger.info(f"Filtered contact names: {[c.get('name', 'Unknown') for c in filtered_contacts[:10]]}")
+        if len(filtered_contacts) > 10:
+            logger.info(f"... and {len(filtered_contacts) - 10} more")
+        
+        # Save filtered contacts to DB
+        if campaign_id and user_id and filtered_contacts:
+            try:
+                from core.db import update_campaign
+                logger.info(f"Saving {len(filtered_contacts)} filtered contacts to campaign {campaign_id}")
+                update_campaign(campaign_id, user_id, contacts=json.dumps(filtered_contacts))
+            except Exception as e:
+                logger.error(f"Failed to save filtered contacts to DB: {e}")
+        
+        return json.dumps({
+            "status": "success",
+            "message": f"Filtered contacts by criteria from user prompt",
+            "results": filtered_contacts,
+            "count": len(filtered_contacts),
+            "original_count": len(contacts),
+            "criteria": user_prompt
+        })
+    
+    except Exception as e:
+        logger.error(f"Error filtering contacts with Gemini: {str(e)}")
+        # Fallback: return all contacts if filtering fails
+        logger.warning("Filtering failed, returning all contacts as fallback")
+        return json.dumps({
+            "status": "error",
+            "message": f"Filtering failed: {str(e)}. Returning all contacts.",
+            "results": contacts,
+            "count": len(contacts),
+            "original_count": len(contacts)
+        })
+
 
 # ... existing gmail_tool signature ...
 def gmail_tool(action: str, params: str) -> str:
@@ -161,42 +360,59 @@ def gmail_tool(action: str, params: str) -> str:
             return json.dumps({"status": "error", "message": "Access token is required for Gmail actions"})
         
         subject = params_dict.get('subject', 'Test Campaign Title')
-        body = params_dict.get('body', 'This is a test body for our automated campaign.')
+        body_template = params_dict.get('body', 'This is a test body for our automated campaign.')
         
-        # --- CALL SEPARATED APOLLO FUNCTION ---
+        # Get recipients list (filtered contacts from previous step)
+        recipients = params_dict.get('recipients', [])
         campaign_id = params_dict.get('campaign_id')
         user_id = params_dict.get('user_id')
         
-        fetched_contacts = []
-        fetched_emails = []
+        # If no recipients provided, fall back to fetching from Apollo (backward compatibility)
+        if not recipients:
+            logger.info("No recipients provided, fetching from Apollo...")
+            try:
+                apollo_res_str = execute_apollo_search_people(
+                    query="",
+                    campaign_id=campaign_id,
+                    user_id=user_id
+                )
+                apollo_res = json.loads(apollo_res_str)
+                if apollo_res.get("status") == "success":
+                    recipients = apollo_res.get("results", [])
+            except Exception as e:
+                logger.error(f"Error calling execute_apollo_search_people: {e}")
         
-        try:
-             # Call the now separate Apollo tool
-             apollo_res_str = execute_apollo_search_people(
-                 query="", # Default or extract from params if needed
-                 campaign_id=campaign_id,
-                 user_id=user_id
-             )
-             apollo_res = json.loads(apollo_res_str)
-             if apollo_res.get("status") == "success":
-                 fetched_contacts = apollo_res.get("results", [])
-                 # Extract emails for logging/count (remember we DON'T send to them)
-                 fetched_emails = [c.get("email") for c in fetched_contacts if c.get("email")]
-        except Exception as e:
-            logger.error(f"Error calling execute_apollo_search_people: {e}")
-
         # --- REAL SENDING LOGIC (RESTRICTED TO TEST EMAILS ONLY) ---
-        # CRITICAL: ONLY send to TARGET_EMAILS. Do NOT send to fetched Apollo contacts.
-        # We still fetch Apollo contacts for DB saving and logging, but we filter the actual send list.
+        # CRITICAL: ONLY send to TARGET_EMAILS. Do NOT send to recipients list.
+        # We use recipients list for personalization, but send to test emails only.
         target_list = TARGET_EMAILS
         
-        logger.info(f"Targeting {len(target_list)} recipients (MANUAL TEST LIST ONLY). Ignoring {len(fetched_emails)} Apollo contacts for safety.")
+        logger.info(f"Targeting {len(target_list)} test recipients. Using {len(recipients)} contacts for personalization.")
         
         results = []
         sent_count = 0
         
+        # Personalize emails using recipient data (even though we send to test emails)
+        # Use first recipient's data for personalization, or generic if no recipients
+        personalization_data = recipients[0] if recipients else {}
+        
         for email in target_list:
             try:
+                # Personalize email body and subject
+                personalized_body = body_template
+                personalized_subject = subject
+                
+                # Replace placeholders with actual data from recipients
+                name = personalization_data.get("name", "")
+                company = personalization_data.get("organization_name", "")
+                title = personalization_data.get("title", "")
+                
+                personalized_body = personalized_body.replace("{name}", name)
+                personalized_body = personalized_body.replace("{company}", company)
+                personalized_body = personalized_body.replace("{title}", title)
+                personalized_subject = personalized_subject.replace("{name}", name)
+                personalized_subject = personalized_subject.replace("{company}", company)
+                
                 # Add a small delay to avoid rate limits
                 import time
                 time.sleep(0.5) 
@@ -206,11 +422,11 @@ def gmail_tool(action: str, params: str) -> str:
                 if campaign_id:
                     response_link += f"&campaignId={campaign_id}"
                 
-                modified_body = body + f"\n\n---\nReply specifically to this campaign here: {response_link}"
+                modified_body = personalized_body + f"\n\n---\nReply specifically to this campaign here: {response_link}"
                 # -------------------------
 
-                logger.info(f"Sending email to {email}...")
-                send_res = send_gmail(email, subject, modified_body, access_token)
+                logger.info(f"Sending personalized email to {email} (using data from {name} at {company})...")
+                send_res = send_gmail(email, personalized_subject, modified_body, access_token)
                 results.append({"email": email, "result": send_res})
                 
                 if send_res.get('status') == 'success':
@@ -220,7 +436,6 @@ def gmail_tool(action: str, params: str) -> str:
                 results.append({"email": email, "result": {"status": "error", "message": str(e)}})
 
         # Update analytics if we have campaign context
-        campaign_id = params_dict.get('campaign_id')
         if campaign_id:
              try:
                  from core.db import create_or_update_analytics
@@ -230,9 +445,10 @@ def gmail_tool(action: str, params: str) -> str:
 
         return json.dumps({
             "status": "success",
-            "message": f"Sent {sent_count}/{len(target_list)} emails successfully.",
+            "message": f"Sent {sent_count}/{len(target_list)} emails successfully (to test emails only).",
             "results": results,
-            "apollo_contacts": fetched_contacts
+            "recipients_used_for_personalization": len(recipients),
+            "note": "Emails sent to test addresses only, not to actual recipients"
         })
 
     elif action == "send":
@@ -328,19 +544,35 @@ def execute_gmail_send_bulk_emails(
     subject: str,
     body_template: str,
     is_html: bool = False,
-    delay_seconds: int = 2
+    delay_seconds: int = 2,
+    campaign_id: Optional[str] = None,
+    user_id: Optional[str] = None
 ) -> str:
-    """Execute Gmail bulk send."""
+    """Execute Gmail bulk send by calling gmail_tool with send_to_list action."""
     logger.info(f"Gmail send_bulk_emails: recipients={len(recipients)}, subject={subject}")
     
-    # TODO: Implement actual Gmail API call
-    return json.dumps({
-        "status": "success",
-        "message": "Gmail send_bulk_emails - placeholder implementation",
-        "sent_count": len(recipients),
-        "failed_count": 0,
-        "subject": subject
-    })
+    # Get access token from context
+    from core.context import current_token_var
+    access_token = current_token_var.get()
+    
+    if not access_token:
+        return json.dumps({
+            "status": "error",
+            "message": "No access token available. Please ensure you are logged in."
+        })
+    
+    # Build params for gmail_tool
+    params = {
+        "access_token": access_token,
+        "subject": subject,
+        "body": body_template,
+        "recipients": recipients,
+        "campaign_id": campaign_id,
+        "user_id": user_id
+    }
+    
+    # Call the actual gmail_tool with send_to_list action
+    return gmail_tool("send_to_list", json.dumps(params))
 
 
 def execute_gmail_create_draft(
@@ -439,6 +671,7 @@ def send_gmail(to: str, subject: str, body: str, access_token: str) -> Dict[str,
 
 TOOL_EXECUTORS: Dict[str, Callable] = {
     "apollo_search_people": execute_apollo_search_people,
+    "filter_contacts_by_company_criteria": execute_filter_contacts_by_company_criteria,
     "gmail_send_email": execute_gmail_send_email,
     "gmail_send_bulk_emails": execute_gmail_send_bulk_emails,
     "gmail_create_draft": execute_gmail_create_draft,
@@ -465,15 +698,22 @@ def json_schema_to_pydantic_field(name: str, schema: Dict[str, Any], required: b
         "number": float,
         "boolean": bool,
         "array": list,
-        "object": dict,
+        "object": Dict[str, Any],  # Use Dict[str, Any] for objects
     }
     
     python_type = type_mapping.get(json_type, str)
     
     # Handle arrays with items
     if json_type == "array":
-        items_type = schema.get("items", {}).get("type", "string")
-        item_python_type = type_mapping.get(items_type, str)
+        items_schema = schema.get("items", {})
+        items_type = items_schema.get("type", "string")
+        
+        # For objects in arrays, use Dict[str, Any]
+        if items_type == "object":
+            item_python_type = Dict[str, Any]
+        else:
+            item_python_type = type_mapping.get(items_type, str)
+        
         python_type = List[item_python_type]
     
     # Make optional if not required
@@ -535,7 +775,7 @@ ALL_TOOLS = create_all_langchain_tools()
 GmailTool = StructuredTool.from_function(
     func=gmail_tool,
     name="gmail_tool",
-    description="Gmail tool for sending emails. Actions: 'send_to_list' (sends to predefined email list) and 'send' (sends to a specific email). Requires 'access_token' in params.",
+    description="Gmail tool for sending emails. Actions: 'send_to_list' (sends to test emails with personalization from recipients list) and 'send' (sends to a specific email). Requires 'access_token' in params. For 'send_to_list', provide 'recipients' array with filtered contacts for personalization.",
     args_schema=GmailToolInput
 )
 

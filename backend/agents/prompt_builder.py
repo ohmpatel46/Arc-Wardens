@@ -96,26 +96,11 @@ def build_intent_routing_guide(tool_schemas: List[Dict[str, Any]], categories: D
     # Define intent patterns for each category
     intent_patterns = {
         "lead_generation": {
-            "keywords": ["find", "search", "get", "discover", "look for", "locate", "who are", "list of"],
+            "keywords": ["find", "search", "get", "discover", "look for", "locate", "who are", "list of", "filter"],
             "examples": [
-                '"Find me software engineers" → `apollo_search_people`',
-                '"Search for SaaS companies" → `apollo_search_companies`',
-                '"Get more info about John Smith" → `apollo_enrich_person`'
-            ]
-        },
-        "list_management": {
-            "keywords": ["create list", "make a list", "add to list", "organize", "group", "save to list"],
-            "examples": [
-                '"Create a list for this campaign" → `apollo_create_list`',
-                '"Add these contacts to my list" → `apollo_add_to_list`'
-            ]
-        },
-        "data_management": {
-            "keywords": ["read", "write", "update", "save", "export", "import", "spreadsheet", "sheet", "cell"],
-            "examples": [
-                '"Read my contacts from the sheet" → `sheets_read_range`',
-                '"Save these results to the spreadsheet" → `sheets_write_range` or `sheets_append_rows`',
-                '"Update the status cell" → `sheets_update_cell`'
+                '"Find me software engineers in Bengaluru" → `apollo_search_people` then `filter_contacts_by_company_criteria`',
+                '"Find CTOs at Fortune 500 companies" → `apollo_search_people` then `filter_contacts_by_company_criteria`',
+                '"Search for people at AI startups" → `apollo_search_people` then `filter_contacts_by_company_criteria`'
             ]
         },
         "email_operations": {
@@ -174,17 +159,30 @@ The following tools have significant side effects. **Always confirm with the use
 ### 3. Tool Chaining Patterns
 Common workflows that chain multiple tools:
 
-**Lead Generation → List → Email Campaign:**
-1. `apollo_search_people` - Find leads matching criteria
-2. `apollo_create_list` - Create a list for the campaign
-3. `apollo_add_to_list` - Add found leads to the list
-4. `sheets_append_rows` - Export leads to spreadsheet (optional)
-5. `gmail_send_bulk_emails` - Send campaign emails
+**Lead Generation → Filter → Email Campaign:**
+1. `apollo_search_people` - Fetch all contacts from Apollo (free tier returns all contacts)
+2. `filter_contacts_by_company_criteria` - Filter contacts by criteria from user's prompt (e.g., "Fortune 500", "Series C startups", "CTOs")
+3. Draft email in conversation - Show user email draft with subject and body, iterate until confirmed
+4. `gmail_tool` with action "send_to_list" - Send personalized emails (currently sends to test emails only for safety)
 
-**Data Sync Workflow:**
-1. `sheets_read_range` - Read existing data
-2. `apollo_search_people` - Find new leads
-3. `sheets_append_rows` - Add new leads to sheet
+**Email Draft Workflow:**
+- When user wants to send emails, IMMEDIATELY draft an email based on context (what they told you about their product/service)
+- Do NOT ask for subject/body separately - be proactive and create a draft based on the conversation
+- Show subject and body with placeholders like {{name}}, {{company}}, {{title}}
+- Example draft format:
+  ---
+  **Subject:** {{name}}, quick question about {{company}}
+  
+  **Body:**
+  Hi {{name}},
+  
+  [Your drafted message here based on what user told you about their product]
+  
+  Best regards
+  ---
+- Ask "Does this look good, or would you like me to adjust anything?"
+- Iterate based on feedback until user confirms
+- THEN call the email tool - campaign_id and user_id are AUTOMATICALLY provided, do NOT ask for them
 
 ### 4. Error Handling
 - If a tool returns an error, explain it clearly to the user

@@ -16,11 +16,24 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # Configure logging
+import logging.handlers
+
+# Create logs directory if it doesn't exist
+logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+os.makedirs(logs_dir, exist_ok=True)
+
+# Configure logging with both console and file handlers
+log_file = os.path.join(logs_dir, 'campaign_agent.log')
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file, encoding='utf-8'),
+        logging.StreamHandler()  # Also log to console
+    ]
 )
 logger = logging.getLogger(__name__)
+logger.info(f"Logging to file: {log_file}")
 
 # Add Circle_wallet to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Circle_wallet'))
@@ -352,11 +365,13 @@ async def campaign_chat(request: CampaignChatRequest, user: dict = Depends(get_c
             try:
                 agent = get_agent()
                 
-                logger.info("Calling CampaignAgent...")
-                # Note: access_token is consumed via context variable in tools, not passed to chat()
+                logger.info(f"Calling CampaignAgent for campaign {request.campaignId}...")
+                # Pass campaign context so tools can associate data with the campaign
                 result = agent.chat(
                     message=request.message,
-                    conversation_history=request.conversationHistory
+                    conversation_history=request.conversationHistory,
+                    campaign_id=request.campaignId,
+                    user_id=user['user_id']
                 )
                 return result
             finally:
@@ -367,7 +382,7 @@ async def campaign_chat(request: CampaignChatRequest, user: dict = Depends(get_c
             return {
                 "success": False,
                 "error": str(e),
-                "message": "The AI Agent encountered an error. If this is an authentication error, please ensure your OPENAI_API_KEY is set in .env."
+                "message": f"The AI Agent encountered an error: {str(e)}. Please check the server logs for more details."
             }
     except HTTPException:
         raise

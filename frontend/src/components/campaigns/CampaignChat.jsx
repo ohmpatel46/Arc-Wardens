@@ -44,7 +44,11 @@ export default function CampaignChat({
                     : 'bg-white border border-gray-100 text-gray-800 rounded-2xl rounded-tl-sm'
                   }`}
               >
-                <div className="whitespace-pre-wrap break-words font-[Inter]">{message.content}</div>
+                <div className="whitespace-pre-wrap break-words font-[Inter]">
+                  {typeof message.content === 'string' 
+                    ? message.content 
+                    : JSON.stringify(message.content, null, 2)}
+                </div>
               </div>
             </div>
           ))

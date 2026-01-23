@@ -153,14 +153,14 @@ function App() {
     }
   }, [walletId])
 
-  // Poll for wallet data (only if user logged in)
+  // Poll for wallet data (only when wallet tab is visible)
   useEffect(() => {
-    if (user) {
-      fetchWalletData()
+    if (user && showWallet && walletId) {
+      // Initial fetch is handled by the other useEffect
       const interval = setInterval(fetchWalletData, 10000) // Poll every 10 seconds
       return () => clearInterval(interval)
     }
-  }, [fetchWalletData, user])
+  }, [fetchWalletData, user, showWallet, walletId])
 
   const handleSendTransaction = async () => {
     if (!walletId || !sendAmount || !sendAddress || !sendTokenId || isSending) return
@@ -253,9 +253,14 @@ function App() {
       })
 
       const responseData = response.data
+      // Ensure content is always a string (handle object responses)
+      let contentValue = responseData.message || responseData.response || responseData.content || 'No response received'
+      if (typeof contentValue !== 'string') {
+        contentValue = JSON.stringify(contentValue, null, 2)
+      }
       const aiMessage = {
         role: 'assistant',
-        content: responseData.message || responseData.response || responseData.content || 'No response received'
+        content: contentValue
       }
 
       const updatedMessages = [...newMessages, aiMessage]
@@ -266,9 +271,10 @@ function App() {
       let errorMessage = 'Sorry, I encountered an error. Please try again.'
 
       if (error.response) {
-        errorMessage = error.response.data?.error ||
-          error.response.data?.message ||
-          `Server error: ${error.response.status} ${error.response.statusText}`
+        const errData = error.response.data?.error || error.response.data?.message
+        errorMessage = typeof errData === 'string' 
+          ? errData 
+          : `Server error: ${error.response.status} ${error.response.statusText}`
       } else if (error.request) {
         errorMessage = 'Unable to reach the server. Please check your connection.'
       } else {
