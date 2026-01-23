@@ -59,7 +59,8 @@ function App() {
   }, [walletId, user])
 
   const [currentWalletAddress, setCurrentWalletAddress] = useState('')
-  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [pendingCost, setPendingCost] = useState(0)
+  const [isPaymentPending, setIsPaymentPending] = useState(false)
 
   // Delete confirmation state
   const [showDeleteModal, setShowDeleteModal] = useState(false)
@@ -86,10 +87,20 @@ function App() {
   // if (authLoading) return <div className="h-screen flex items-center justify-center"><LoadingSpinner /></div>
   // if (!user) return <Login />
 
+  // Load messages when campaign changes
   useEffect(() => {
     const campaign = campaigns.find(c => c.id === activeCampaignId)
     setMessages(campaign?.messages || [])
   }, [activeCampaignId, campaigns])
+
+  // Reset payment state only when switching campaigns (not on every campaign update)
+  // This ensures each "session" with a campaign starts fresh
+  useEffect(() => {
+    // Reset payment pending state when switching to a different campaign
+    // Payment state is only set during current session when agent returns a cost
+    setPendingCost(0)
+    setIsPaymentPending(false)
+  }, [activeCampaignId])
 
   const fetchCampaignsFromDB = async () => {
     try {
@@ -104,11 +115,12 @@ function App() {
 
   // REMOVED: Global walletId storage - now user-partitioned above
 
+  // Fetch wallet data when user is logged in (for balance widget shown everywhere)
   useEffect(() => {
-    if (showWallet && walletId) {
+    if (user) {
       fetchWalletData()
     }
-  }, [showWallet, walletId])
+  }, [user, walletId])
 
   const fetchWalletData = useCallback(async () => {
 
@@ -153,14 +165,14 @@ function App() {
     }
   }, [walletId])
 
-  // Poll for wallet data (only if user logged in)
+  // Poll for wallet balance (runs while user is logged in to keep balance widget updated)
   useEffect(() => {
-    if (user) {
-      fetchWalletData()
-      const interval = setInterval(fetchWalletData, 10000) // Poll every 10 seconds
+    if (user && !showAnalytics) {
+      // Poll every 30 seconds for balance (lighter polling since we aggressively fetch after payments)
+      const interval = setInterval(fetchWalletData, 30000)
       return () => clearInterval(interval)
     }
-  }, [fetchWalletData, user])
+  }, [fetchWalletData, user, showAnalytics])
 
   const handleSendTransaction = async () => {
     if (!walletId || !sendAmount || !sendAddress || !sendTokenId || isSending) return
@@ -234,8 +246,40 @@ function App() {
     setCampaigns(campaigns.map(c => c.id === activeCampaignId ? { ...c, ...updates } : c))
   }
 
+  // Save messages and pending cost to database
+  const saveMessagesToDB = async (campaignId, messagesArray, costToSave = null) => {
+    try {
+      const updateData = {
+        campaignId: campaignId,
+        messages: messagesArray
+      }
+      if (costToSave !== null) {
+        updateData.pendingCost = costToSave
+      }
+      await axios.put(`${API_BASE}/campaign/update`, updateData)
+    } catch (error) {
+      console.error('Error saving messages to database:', error)
+    }
+  }
+
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return
+
+    // Block sending new messages when payment is pending
+    if (isPaymentPending && pendingCost > 0) {
+      const userMessage = { role: 'user', content: inputMessage }
+      const paymentReminderMessage = {
+        role: 'assistant',
+        content: `Please complete the payment of ${pendingCost.toFixed(2)} USDC to proceed. Click the "Pay ${pendingCost.toFixed(2)} USDC" button to continue.`
+      }
+      const updatedMessages = [...messages, userMessage, paymentReminderMessage]
+      setMessages(updatedMessages)
+      setInputMessage('')
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
+      // Save messages but don't reset pending cost
+      saveMessagesToDB(activeCampaignId, updatedMessages)
+      return
+    }
 
     const userMessage = { role: 'user', content: inputMessage }
     const newMessages = [...messages, userMessage]
@@ -253,82 +297,170 @@ function App() {
       })
 
       const responseData = response.data
+      // Ensure content is always a string (handle object responses)
+      let contentValue = responseData.message || responseData.response || responseData.content || 'No response received'
+      if (typeof contentValue !== 'string') {
+        contentValue = JSON.stringify(contentValue, null, 2)
+      }
+      
+      // Handle cost from response
+      const cost = responseData.cost || 0
+      if (cost > 0) {
+        setPendingCost(cost)
+        setIsPaymentPending(true)
+      } else {
+        setPendingCost(0)
+        setIsPaymentPending(false)
+      }
+      
       const aiMessage = {
         role: 'assistant',
-        content: responseData.message || responseData.response || responseData.content || 'No response received'
+        content: contentValue
       }
-
       const updatedMessages = [...newMessages, aiMessage]
       setMessages(updatedMessages)
-      updateCampaign({ messages: updatedMessages })
+      updateCampaign({ messages: updatedMessages, pendingCost: cost })
+      
+      // Persist messages and pending cost to database
+      saveMessagesToDB(activeCampaignId, updatedMessages, cost)
     } catch (error) {
       console.error('Error sending message:', error)
       let errorMessage = 'Sorry, I encountered an error. Please try again.'
 
       if (error.response) {
-        errorMessage = error.response.data?.error ||
-          error.response.data?.message ||
-          `Server error: ${error.response.status} ${error.response.statusText}`
+        const errData = error.response.data?.error || error.response.data?.message
+        errorMessage = typeof errData === 'string' 
+          ? errData 
+          : `Server error: ${error.response.status} ${error.response.statusText}`
       } else if (error.request) {
         errorMessage = 'Unable to reach the server. Please check your connection.'
       } else {
         errorMessage = error.message || errorMessage
       }
 
-      setMessages([...newMessages, {
+      const errorMessages = [...newMessages, {
         role: 'assistant',
         content: errorMessage
-      }])
+      }]
+      setMessages(errorMessages)
+      // Save even error messages so user doesn't lose context
+      saveMessagesToDB(activeCampaignId, errorMessages)
     } finally {
       setIsLoading(false)
     }
   }
 
-  const initiatePayment = () => {
-    if (isLoading || !activeCampaignId) return
-    setShowPaymentModal(true)
-  }
-
+  // Direct payment - no modal, executes immediately when Pay button is clicked
   const processPayment = async () => {
+    if (isLoading || !activeCampaignId || !isPaymentPending || pendingCost <= 0) return
+    
     setIsLoading(true)
     try {
+      const paymentAmount = pendingCost
+      
       // 1. Send transaction (walletId will be picked up from .env by backend if empty)
       const sendRes = await axios.post(`${API_BASE}/wallet/send`, {
         walletId: '',
         receiverAddress: '',
-        amount: CAMPAIGN_COST.toString(),
+        amount: paymentAmount.toString(),
         tokenId: ''
       })
 
       if (sendRes.data.success || sendRes.data.challengeId) {
-        // 2. Mark campaign as paid
+        // 2. Execute pending action after payment
         const payRes = await axios.post(`${API_BASE}/campaign/pay`, {
           campaignId: activeCampaignId,
-          amount: CAMPAIGN_COST
+          amount: paymentAmount
         })
 
         if (payRes.data.success) {
-          // Update local state
-          setCampaigns(campaigns.map(c =>
-            c.id === activeCampaignId ? { ...c, paid: true, analytics: DEFAULT_ANALYTICS } : c // Reset or set analytics
-          ))
-
-          // Refresh campaigns to get the full updated object including generated analytics from backend
-          fetchCampaignsFromDB()
-
-          setShowPaymentModal(false)
-
-          // Refresh wallet balance immediately and multiple times to capture the update
+          // Aggressively refresh wallet balance to catch update
           fetchWalletData()
+          setTimeout(() => fetchWalletData(), 1000)
           setTimeout(() => fetchWalletData(), 2000)
           setTimeout(() => fetchWalletData(), 4000)
           setTimeout(() => fetchWalletData(), 6000)
+          
+          // Check if another payment is required (e.g., filter after search)
+          if (payRes.data.requires_payment && payRes.data.cost > 0) {
+            // Add message about completing first action and needing next payment
+            const progressMessage = {
+              role: 'assistant',
+              content: payRes.data.message || `Action completed. Next step requires payment.`
+            }
+            const updatedMessages = [...messages, progressMessage]
+            setMessages(updatedMessages)
+            
+            // Set up the next payment
+            setPendingCost(payRes.data.cost)
+            setIsPaymentPending(true)
+            
+            // Save messages with new pending cost
+            await saveMessagesToDB(activeCampaignId, updatedMessages, payRes.data.cost)
+            
+            // Update local campaign state - mark as PAID (green dot) since payment was processed
+            setCampaigns(campaigns.map(c =>
+              c.id === activeCampaignId 
+                ? { ...c, messages: updatedMessages, paid: true, executed: true } 
+                : c
+            ))
+          } else {
+            // All done - reset payment state
+            setPendingCost(0)
+            setIsPaymentPending(false)
+            
+            // Add success message showing the tool result to conversation
+            const successMessage = {
+              role: 'assistant',
+              content: payRes.data.message || `Payment successful! Action completed.`
+            }
+            const updatedMessages = [...messages, successMessage]
+            setMessages(updatedMessages)
+            
+            // Save messages to DB
+            await saveMessagesToDB(activeCampaignId, updatedMessages, 0)
+            
+            // Update local campaign state - mark as PAID (green dot)
+            setCampaigns(campaigns.map(c =>
+              c.id === activeCampaignId 
+                ? { ...c, messages: updatedMessages, paid: true, executed: true } 
+                : c
+            ))
+          }
+        } else {
+          // Reset payment state on failure
+          setPendingCost(0)
+          setIsPaymentPending(false)
+          
+          // Payment succeeded but action failed - show error
+          const errorMessage = {
+            role: 'assistant',
+            content: payRes.data.message || `Payment processed but action failed. Please try again.`
+          }
+          const updatedMessages = [...messages, errorMessage]
+          setMessages(updatedMessages)
+          saveMessagesToDB(activeCampaignId, updatedMessages, 0)
         }
+      } else {
+        // Transaction failed - don't reset payment state so user can retry
+        const errorMessage = {
+          role: 'assistant',
+          content: `Payment failed: ${sendRes.data.error || 'Transaction could not be processed'}. Please try again.`
+        }
+        const updatedMessages = [...messages, errorMessage]
+        setMessages(updatedMessages)
+        saveMessagesToDB(activeCampaignId, updatedMessages)
       }
     } catch (error) {
       console.error('Payment failed:', error)
-      alert(`Payment failed: ${error.response?.data?.detail || error.message}`)
-      setShowPaymentModal(false)
+      // Add error message to conversation
+      const errorMsg = {
+        role: 'assistant',
+        content: `Payment failed: ${error.response?.data?.detail || error.message}. Please try again.`
+      }
+      const updatedMessages = [...messages, errorMsg]
+      setMessages(updatedMessages)
+      saveMessagesToDB(activeCampaignId, updatedMessages)
     } finally {
       setIsLoading(false)
     }
@@ -542,19 +674,11 @@ function App() {
               onInputChange={setInputMessage}
               onSendMessage={handleSendMessage}
               textareaRef={textareaRef}
-              onPay={initiatePayment}
-              isPaid={activeCampaign?.paid}
-              campaignCost={CAMPAIGN_COST}
-            />
-
-            <ConfirmationModal
-              isOpen={showPaymentModal}
-              onClose={() => setShowPaymentModal(false)}
-              onConfirm={processPayment}
-              title="Confirm Payment"
-              message={`Are you sure you want to pay $${CAMPAIGN_COST} USDC to activate this campaign? This action cannot be undone.`}
-              confirmText={`Pay $${CAMPAIGN_COST}`}
-              isLoading={isLoading}
+              onPay={processPayment}
+              campaignCost={pendingCost > 0 ? pendingCost : CAMPAIGN_COST}
+              pendingCost={pendingCost}
+              isPaymentPending={isPaymentPending}
+              isPaid={activeCampaign?.executed || activeCampaign?.paid || false}
             />
           </>
         ) : (

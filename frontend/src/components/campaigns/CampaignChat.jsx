@@ -11,7 +11,9 @@ export default function CampaignChat({
   textareaRef,
   onPay,
   isPaid,
-  campaignCost = 1
+  campaignCost = 1,
+  pendingCost = 0,
+  isPaymentPending = false
 }) {
   const messagesEndRef = useRef(null)
 
@@ -37,7 +39,11 @@ export default function CampaignChat({
                   : 'bg-white border border-gray-100 text-gray-800 rounded-2xl rounded-tl-sm'
                   }`}
               >
-                <div className="whitespace-pre-wrap break-words font-[Inter]">{message.content}</div>
+                <div className="whitespace-pre-wrap break-words font-[Inter]">
+                  {typeof message.content === 'string'
+                    ? message.content
+                    : JSON.stringify(message.content, null, 2)}
+                </div>
               </div>
             </div>
           ))
@@ -81,21 +87,22 @@ export default function CampaignChat({
             />
 
             <div className="flex gap-2 pb-1 pr-1">
-              {!isPaid && (
-                <button
-                  onClick={onPay}
-                  disabled={isLoading}
-                  className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 p-2.5 rounded-xl transition-all duration-200 flex items-center gap-2 group/pay focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                  title="Pay to Activate"
-                >
-                  <span className="text-xs font-bold px-1 hidden md:block group-hover/pay:block underline-offset-2">Pay ${campaignCost}</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                  </svg>
-                </button>
+              {/* Show cost when payment is pending - regardless of isPaid (allows multiple payments per campaign) */}
+              {isPaymentPending && pendingCost > 0 && (
+                <span className="text-sm text-gray-600 flex items-center px-3">
+                  Cost: {pendingCost.toFixed(2)} USDC
+                </span>
               )}
 
               <button
+                onClick={isPaymentPending && pendingCost > 0 ? onPay : onSendMessage}
+                disabled={isLoading || (!(isPaymentPending && pendingCost > 0) && !inputMessage.trim())}
+                className={`px-4 py-2.5 rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500/30 ${(isPaymentPending && pendingCost > 0) || (inputMessage.trim() && !isLoading)
+                    ? isPaymentPending && pendingCost > 0
+                      ? 'bg-emerald-600 text-white shadow-md hover:bg-emerald-700 hover:scale-105 active:scale-95'
+                      : 'bg-indigo-600 text-white shadow-md hover:bg-indigo-700 hover:scale-105 active:scale-95'
+                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  }`}
                 onClick={onSendMessage}
                 disabled={isLoading || !inputMessage.trim()}
                 className={`p-2.5 rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500/30 ${inputMessage.trim()
@@ -103,9 +110,19 @@ export default function CampaignChat({
                   : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                   }`}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 transform rotate-90" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-                </svg>
+                {/* Show Pay button when payment is pending - regardless of isPaid */}
+                {isPaymentPending && pendingCost > 0 ? (
+                  <span className="flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                    </svg>
+                    Pay {pendingCost.toFixed(2)} USDC
+                  </span>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 transform rotate-90" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                  </svg>
+                )}
               </button>
             </div>
           </div>

@@ -4,9 +4,9 @@ requests
 python-dotenv
 cryptography
 pydantic
-langchain
+langchain>=0.1.0
 langchain-google-genai
-langchain-core
+langchain-core>=0.1.0
 google-auth
 google-api-python-client
 google-auth-oauthlib

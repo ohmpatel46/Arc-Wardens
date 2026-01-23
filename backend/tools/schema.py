@@ -58,366 +58,6 @@ APOLLO_SEARCH_PEOPLE = {
     "costInfo": "Credits consumed per search based on results returned"
 }
 
-APOLLO_SEARCH_COMPANIES = {
-    "name": "apollo_search_companies",
-    "description": "Search for companies in Apollo database. Use when user wants to find companies matching specific criteria like industry, size, or location. Returns a list of matching companies with their information.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Natural language search query (e.g., 'SaaS companies', 'fintech startups in NYC')"
-            },
-            "industries": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "List of industries to filter by (e.g., ['Software', 'Financial Services'])"
-            },
-            "employee_count": {
-                "type": "string",
-                "enum": ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10000", "10001+"],
-                "description": "Employee count range to filter by"
-            },
-            "locations": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "List of locations to filter by"
-            },
-            "limit": {
-                "type": "integer",
-                "default": 25,
-                "minimum": 1,
-                "maximum": 100,
-                "description": "Maximum number of results to return (default: 25)"
-            }
-        },
-        "required": ["query"]
-    },
-    "sideEffects": "Makes API call to Apollo. May incur API costs.",
-    "category": "lead_generation",
-    "costInfo": "Credits consumed per search"
-}
-
-APOLLO_ENRICH_PERSON = {
-    "name": "apollo_enrich_person",
-    "description": "Enrich a person's contact information using Apollo. Use when user wants to get more details about a specific contact like email, phone, social profiles. Requires at least an email OR name+domain combination.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "email": {
-                "type": "string",
-                "format": "email",
-                "description": "Email address of the person to enrich"
-            },
-            "first_name": {
-                "type": "string",
-                "description": "First name of the person (use with last_name and domain)"
-            },
-            "last_name": {
-                "type": "string",
-                "description": "Last name of the person (use with first_name and domain)"
-            },
-            "domain": {
-                "type": "string",
-                "description": "Company domain (e.g., 'apollo.io') - use with first_name and last_name"
-            },
-            "linkedin_url": {
-                "type": "string",
-                "description": "LinkedIn profile URL for the person"
-            }
-        },
-        "required": []
-    },
-    "sideEffects": "Makes API call to Apollo. Consumes enrichment credits.",
-    "category": "lead_generation",
-    "costInfo": "1 enrichment credit per person"
-}
-
-APOLLO_CREATE_LIST = {
-    "name": "apollo_create_list",
-    "description": "Create a new contact list in Apollo for organizing leads. Use when user wants to create a list to group contacts for a campaign or organization.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "name": {
-                "type": "string",
-                "description": "Name of the list to create (e.g., 'Q1 Outreach Targets')"
-            },
-            "description": {
-                "type": "string",
-                "description": "Optional description of the list's purpose"
-            }
-        },
-        "required": ["name"]
-    },
-    "sideEffects": "Creates a new list in Apollo account.",
-    "category": "list_management",
-    "costInfo": "No additional cost"
-}
-
-APOLLO_ADD_TO_LIST = {
-    "name": "apollo_add_to_list",
-    "description": "Add contacts to an existing Apollo list. Use when user wants to add found leads or contacts to a list for organization or campaign targeting.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "list_id": {
-                "type": "string",
-                "description": "ID of the Apollo list to add contacts to"
-            },
-            "person_ids": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "List of Apollo person IDs to add to the list"
-            }
-        },
-        "required": ["list_id", "person_ids"]
-    },
-    "sideEffects": "Modifies an existing list in Apollo.",
-    "category": "list_management",
-    "costInfo": "No additional cost"
-}
-
-# =============================================================================
-# Google Sheets Tools - Data Management
-# =============================================================================
-
-SHEETS_READ_RANGE = {
-    "name": "sheets_read_range",
-    "description": "Read data from a specific range in a Google Sheet. Use when user wants to retrieve campaign data, contact lists, or any spreadsheet information.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "spreadsheet_id": {
-                "type": "string",
-                "description": "Google Sheets spreadsheet ID (found in the sheet URL after /d/)"
-            },
-            "range": {
-                "type": "string",
-                "description": "A1 notation range to read (e.g., 'Sheet1!A1:D10' or 'Contacts!A:E')"
-            }
-        },
-        "required": ["spreadsheet_id", "range"]
-    },
-    "sideEffects": "Read-only. No data modification.",
-    "category": "data_management",
-    "costInfo": "No cost"
-}
-
-SHEETS_WRITE_RANGE = {
-    "name": "sheets_write_range",
-    "description": "Write or update data in a specific range of a Google Sheet. Use when user wants to save results, update contact information, or modify spreadsheet data. WARNING: Overwrites existing data in the specified range.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "spreadsheet_id": {
-                "type": "string",
-                "description": "Google Sheets spreadsheet ID"
-            },
-            "range": {
-                "type": "string",
-                "description": "A1 notation range to write to (e.g., 'Sheet1!A1:D10')"
-            },
-            "values": {
-                "type": "array",
-                "items": {
-                    "type": "array",
-                    "items": {"type": "string"}
-                },
-                "description": "2D array of values to write (rows x columns)"
-            }
-        },
-        "required": ["spreadsheet_id", "range", "values"]
-    },
-    "sideEffects": "OVERWRITES existing data in the specified range. Confirm with user before executing.",
-    "category": "data_management",
-    "costInfo": "No cost"
-}
-
-SHEETS_APPEND_ROWS = {
-    "name": "sheets_append_rows",
-    "description": "Append new rows to the end of a Google Sheet. Use when user wants to add new contacts, leads, or records without overwriting existing data.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "spreadsheet_id": {
-                "type": "string",
-                "description": "Google Sheets spreadsheet ID"
-            },
-            "sheet_name": {
-                "type": "string",
-                "description": "Name of the sheet/tab to append to (e.g., 'Contacts', 'Sheet1')"
-            },
-            "values": {
-                "type": "array",
-                "items": {
-                    "type": "array",
-                    "items": {"type": "string"}
-                },
-                "description": "2D array of rows to append (each inner array is a row)"
-            }
-        },
-        "required": ["spreadsheet_id", "sheet_name", "values"]
-    },
-    "sideEffects": "Adds new rows at the end of the sheet. Does not overwrite existing data.",
-    "category": "data_management",
-    "costInfo": "No cost"
-}
-
-SHEETS_UPDATE_CELL = {
-    "name": "sheets_update_cell",
-    "description": "Update a single cell in a Google Sheet. Use for targeted updates to specific values.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "spreadsheet_id": {
-                "type": "string",
-                "description": "Google Sheets spreadsheet ID"
-            },
-            "cell": {
-                "type": "string",
-                "description": "A1 notation of the cell to update (e.g., 'Sheet1!B5')"
-            },
-            "value": {
-                "type": "string",
-                "description": "Value to write to the cell"
-            }
-        },
-        "required": ["spreadsheet_id", "cell", "value"]
-    },
-    "sideEffects": "Updates a single cell value.",
-    "category": "data_management",
-    "costInfo": "No cost"
-}
-
-# =============================================================================
-# Gmail Tools - Email Operations
-# =============================================================================
-
-GMAIL_SEND_EMAIL = {
-    "name": "gmail_send_email",
-    "description": "Send a single email via Gmail. Use for individual outreach, follow-ups, or one-off communications. Email is sent immediately upon execution.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "to": {
-                "type": "string",
-                "description": "Recipient email address (or comma-separated list for multiple recipients)"
-            },
-            "subject": {
-                "type": "string",
-                "description": "Email subject line"
-            },
-            "body": {
-                "type": "string",
-                "description": "Email body content (plain text or HTML)"
-            },
-            "cc": {
-                "type": "string",
-                "description": "CC recipients (comma-separated email addresses)"
-            },
-            "bcc": {
-                "type": "string",
-                "description": "BCC recipients (comma-separated email addresses)"
-            },
-            "is_html": {
-                "type": "boolean",
-                "default": False,
-                "description": "Whether the body content is HTML (default: false for plain text)"
-            }
-        },
-        "required": ["to", "subject", "body"]
-    },
-    "sideEffects": "SENDS EMAIL IMMEDIATELY. Cannot be undone. Confirm with user before executing.",
-    "category": "email_operations",
-    "costInfo": "Subject to Gmail sending limits"
-}
-
-GMAIL_SEND_BULK_EMAILS = {
-    "name": "gmail_send_bulk_emails",
-    "description": "Send bulk emails to multiple recipients using a template. Use for campaign outreach to a list of contacts. Supports personalization placeholders like {name}, {company}.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "recipients": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "email": {"type": "string"},
-                        "name": {"type": "string"},
-                        "company": {"type": "string"}
-                    },
-                    "required": ["email"]
-                },
-                "description": "List of recipient objects with email and optional personalization fields"
-            },
-            "subject": {
-                "type": "string",
-                "description": "Email subject line (can include {name}, {company} placeholders)"
-            },
-            "body_template": {
-                "type": "string",
-                "description": "Email body template with placeholders like {name}, {company} for personalization"
-            },
-            "is_html": {
-                "type": "boolean",
-                "default": False,
-                "description": "Whether the body template is HTML"
-            },
-            "delay_seconds": {
-                "type": "integer",
-                "default": 2,
-                "minimum": 1,
-                "maximum": 60,
-                "description": "Delay between emails in seconds to avoid rate limits (default: 2)"
-            }
-        },
-        "required": ["recipients", "subject", "body_template"]
-    },
-    "sideEffects": "SENDS MULTIPLE EMAILS. Cannot be undone. Always confirm recipient count and preview content with user first.",
-    "category": "email_operations",
-    "costInfo": "Subject to Gmail sending limits (500/day for regular, 2000/day for Workspace)"
-}
-
-GMAIL_CREATE_DRAFT = {
-    "name": "gmail_create_draft",
-    "description": "Create an email draft in Gmail without sending it. Use when user wants to prepare an email for review before sending, or save a template.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "to": {
-                "type": "string",
-                "description": "Recipient email address"
-            },
-            "subject": {
-                "type": "string",
-                "description": "Email subject line"
-            },
-            "body": {
-                "type": "string",
-                "description": "Email body content"
-            },
-            "cc": {
-                "type": "string",
-                "description": "CC recipients (comma-separated)"
-            },
-            "bcc": {
-                "type": "string",
-                "description": "BCC recipients (comma-separated)"
-            },
-            "is_html": {
-                "type": "boolean",
-                "default": False,
-                "description": "Whether the body content is HTML"
-            }
-        },
-        "required": ["to", "subject", "body"]
-    },
-    "sideEffects": "Creates a draft in Gmail. Does NOT send the email.",
-    "category": "email_operations",
-    "costInfo": "No cost"
-}
 
 # =============================================================================
 # Utility Tools
@@ -477,6 +117,81 @@ REPEAT_CAMPAIGN_ACTION = {
     "costInfo": "Depends on the action being repeated"
 }
 
+FILTER_CONTACTS_BY_COMPANY_CRITERIA = {
+    "name": "filter_contacts_by_company_criteria",
+    "description": "Filter a list of contacts based on company criteria using AI. Use when user specifies company filters like 'Fortune 500', 'Series C startups', 'AI native companies', etc. Analyzes company information from contact data and returns filtered list. Also saves filtered contacts to campaign database.",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "contacts": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "List of contact objects from Apollo search to filter"
+            },
+            "user_prompt": {
+                "type": "string",
+                "description": "The original user prompt containing filtering criteria (e.g., 'Find all CTOs in Fortune 500 companies', 'Series C startups', 'AI native companies')"
+            },
+            "campaign_id": {
+                "type": "string",
+                "description": "Campaign ID for saving filtered contacts (optional)"
+            },
+            "user_id": {
+                "type": "string",
+                "description": "User ID for campaign ownership verification (optional)"
+            }
+        },
+        "required": ["contacts", "user_prompt"]
+    },
+    "sideEffects": "Uses Gemini API for filtering. May incur API costs. Saves filtered contacts to campaign database if campaign_id provided.",
+    "category": "lead_generation",
+    "costInfo": "Gemini API call cost per filter operation"
+}
+
+# =============================================================================
+# Gmail Tool - Email Sending
+# =============================================================================
+
+GMAIL_TOOL = {
+    "name": "gmail_tool",
+    "description": "Send emails to filtered contacts. Use when the user confirms they want to send emails after reviewing a draft. The email will be personalized with recipient's name and company. In testing mode, emails are only sent to test addresses.",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["send_to_list"],
+                "description": "Action to perform. Use 'send_to_list' to send emails to the filtered contacts."
+            },
+            "subject": {
+                "type": "string",
+                "description": "Email subject line. Can include {name} and {company} placeholders for personalization."
+            },
+            "body": {
+                "type": "string",
+                "description": "Email body content. Can include {name}, {company}, and {title} placeholders for personalization."
+            },
+            "recipients": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "List of recipient contacts with their details (name, email, company, title). Usually from filtered contacts."
+            },
+            "campaign_id": {
+                "type": "string",
+                "description": "Campaign ID to associate emails with"
+            },
+            "user_id": {
+                "type": "string",
+                "description": "User ID for authentication"
+            }
+        },
+        "required": ["action", "subject", "body"]
+    },
+    "sideEffects": "SENDS REAL EMAILS. In testing mode, only sends to test addresses. Requires user confirmation before use.",
+    "category": "email_operations",
+    "costInfo": "Gmail API usage, potential rate limits"
+}
+
 # =============================================================================
 # Tool Registry - All tools organized by category
 # =============================================================================
@@ -484,20 +199,9 @@ REPEAT_CAMPAIGN_ACTION = {
 ALL_TOOL_SCHEMAS: List[Dict[str, Any]] = [
     # Lead Generation
     APOLLO_SEARCH_PEOPLE,
-    APOLLO_SEARCH_COMPANIES,
-    APOLLO_ENRICH_PERSON,
-    # List Management
-    APOLLO_CREATE_LIST,
-    APOLLO_ADD_TO_LIST,
-    # Data Management
-    SHEETS_READ_RANGE,
-    SHEETS_WRITE_RANGE,
-    SHEETS_APPEND_ROWS,
-    SHEETS_UPDATE_CELL,
+    FILTER_CONTACTS_BY_COMPANY_CRITERIA,
     # Email Operations
-    GMAIL_SEND_EMAIL,
-    GMAIL_SEND_BULK_EMAILS,
-    GMAIL_CREATE_DRAFT,
+    GMAIL_TOOL,
     # Utility
     ASK_FOR_CLARIFICATION,
     REPEAT_CAMPAIGN_ACTION,
@@ -507,23 +211,13 @@ ALL_TOOL_SCHEMAS: List[Dict[str, Any]] = [
 TOOL_CATEGORIES = {
     "lead_generation": {
         "display_name": "Lead Generation & Search",
-        "description": "Find and enrich contacts and companies",
-        "tools": ["apollo_search_people", "apollo_search_companies", "apollo_enrich_person"]
-    },
-    "list_management": {
-        "display_name": "Contact List Management", 
-        "description": "Create and manage contact lists",
-        "tools": ["apollo_create_list", "apollo_add_to_list"]
-    },
-    "data_management": {
-        "display_name": "Data Management (Google Sheets)",
-        "description": "Read and write spreadsheet data",
-        "tools": ["sheets_read_range", "sheets_write_range", "sheets_append_rows", "sheets_update_cell"]
+        "description": "Find and filter contacts",
+        "tools": ["apollo_search_people", "filter_contacts_by_company_criteria"]
     },
     "email_operations": {
-        "display_name": "Email Operations (Gmail)",
-        "description": "Send emails and manage drafts",
-        "tools": ["gmail_send_email", "gmail_send_bulk_emails", "gmail_create_draft"]
+        "display_name": "Email Operations",
+        "description": "Send and manage email campaigns",
+        "tools": ["gmail_tool"]
     },
     "utility": {
         "display_name": "Utility",
